@@ -103,6 +103,7 @@ class GreedyScheduler:
                 best_end_time = float('inf')
                 best_path_info = None
                 best_start_time = 0
+                best_empty_time = 0
 
                 for loco in schedulable_locomotives:
                     if task["material_weight"] > loco["Q"]:
@@ -126,10 +127,11 @@ class GreedyScheduler:
                         best_loco = loco
                         best_path_info = path_info
                         best_start_time = start_time
+                        best_empty_time = empty_travel_time
 
                 if best_loco:
                     loco_id = best_loco["id"]
-                    loading_end = best_start_time + self.hyper_params["loading_time"]
+                    loading_end = best_start_time + best_empty_time + self.hyper_params["loading_time"]
                     transport_end = loading_end + best_path_info["time"]
                     unloading_end = transport_end + self.hyper_params["unloading_time"]
 
