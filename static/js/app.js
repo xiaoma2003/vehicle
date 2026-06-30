@@ -9,6 +9,7 @@ let currentLocomotivesData = null;
 let currentHyperParams = null;
 let currentScheduleResult = null;
 let isScheduleRunning = false;
+let scheduleCompleted = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
@@ -913,4 +914,81 @@ function showModal(title, bodyHtml, onConfirm) {
 
 function closeModal() {
     document.getElementById('modalContainer').innerHTML = '';
+}
+
+function updateMapButtons(running, paused) {
+    const runBtn = document.getElementById('mapRunBtn');
+    const pauseBtn = document.getElementById('mapPauseBtn');
+    const resumeBtn = document.getElementById('mapResumeBtn');
+    if (runBtn) {
+        runBtn.disabled = running && !paused;
+        runBtn.style.opacity = (running && !paused) ? '0.5' : '1';
+        runBtn.style.cursor = (running && !paused) ? 'not-allowed' : 'pointer';
+        runBtn.title = (running && !paused) ? '调度进行中，请先暂停' : '执行调度';
+    }
+    if (pauseBtn) {
+        pauseBtn.disabled = !running || paused;
+        pauseBtn.style.opacity = (!running || paused) ? '0.5' : '1';
+    }
+    if (resumeBtn) {
+        resumeBtn.disabled = !paused;
+        resumeBtn.disabled = !paused;
+        resumeBtn.style.opacity = !paused ? '0.5' : '1';
+    }
+}
+
+async function mapRunSchedule() {
+    const runBtn = document.getElementById('mapRunBtn');
+    if (runBtn && runBtn.disabled) {
+        alert('调度进行中或已暂停，请先点击继续或等待完成');
+        return;
+    }
+    const strategy = document.getElementById('mapStrategySelect').value;
+
+    updateMapButtons(true, false);
+
+    const result = await apiCall('/schedule/run', 'POST', {
+        strategy,
+        use_hot_start: false
+    });
+
+    if (result.success && result.data) {
+        currentScheduleResult = result.data;
+        scheduleCompleted = false;
+        document.getElementById('currentBatch').textContent = `批次: ${result.data.batch_id || '-'}`;
+
+        if (result.data.assignments && result.data.assignments.length > 0 && dynamicMap) {
+            dynamicMap.setProgressCallback((progress) => {
+                if (progress >= 100) {
+                    scheduleCompleted = true;
+                    updateMapButtons(false, false);
+                }
+            });
+            dynamicMap.playSchedule(result.data.assignments);
+            isScheduleRunning = true;
+            updateMapButtons(true, false);
+            updateVehicleStatusPanel();
+        } else {
+            updateMapButtons(false, false);
+        }
+    } else {
+        alert('调度失败: ' + (result.error || '未知错误'));
+        updateMapButtons(false, false);
+    }
+}
+
+function mapPauseSchedule() {
+    if (dynamicMap) {
+        dynamicMap.pauseSchedule();
+        isScheduleRunning = false;
+        updateMapButtons(true, true);
+    }
+}
+
+function mapResumeSchedule() {
+    if (dynamicMap && !scheduleCompleted) {
+        dynamicMap.resumeSchedule();
+        isScheduleRunning = true;
+        updateMapButtons(true, false);
+    }
 }

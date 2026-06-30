@@ -37,14 +37,23 @@
                         <div class="map-toolbar">
                             <h3>动态地图展示</h3>
                             <div class="map-controls">
-                                <button onclick="addNodeModal()" class="btn btn-primary">+ 添加节点</button>
-                                <button onclick="addEdgeModal()" class="btn btn-secondary">+ 添加边</button>
-                                <button onclick="loadMapConfig()" class="btn btn-info">🔄 刷新</button>
-                                <select id="directionSelect" onchange="checkDirectionLock()">
-                                    <option value="up">上行方向</option>
-                                    <option value="down">下行方向</option>
+                                <select id="mapStrategySelect">
+                                    <option value="cpsat">CP-SAT 基准</option>
+                                    <option value="greedy">贪心算法</option>
+                                    <option value="genetic">遗传算法</option>
+                                    <option value="simulated_annealing">模拟退火</option>
                                 </select>
-                                <span id="directionStatus" class="direction-status">方向状态: --</span>
+                                <button id="mapRunBtn" onclick="mapRunSchedule()" class="btn btn-primary">▶ 执行调度</button>
+                                <button id="mapPauseBtn" onclick="mapPauseSchedule()" class="btn btn-warning" disabled>⏸ 暂停</button>
+                                <button id="mapResumeBtn" onclick="mapResumeSchedule()" class="btn btn-success" disabled>▶ 继续</button>
+                                <button onclick="addNodeModal()" class="btn btn-info">+ 节点</button>
+                                <button onclick="addEdgeModal()" class="btn btn-info">+ 边</button>
+                                <button onclick="loadMapConfig()" class="btn btn-info">🔄</button>
+                                <select id="directionSelect" onchange="checkDirectionLock()">
+                                    <option value="up">上行</option>
+                                    <option value="down">下行</option>
+                                </select>
+                                <span id="directionStatus" class="direction-status">方向: --</span>
                             </div>
                         </div>
                         <canvas id="mapCanvas" class="map-canvas"></canvas>
