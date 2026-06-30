@@ -369,6 +369,9 @@ function renderScheduleResult(result) {
     const resultDiv = document.getElementById('scheduleResult');
     if (!resultDiv) return;
 
+    // 显示结果面板
+    resultDiv.style.display = 'block';
+
     const assignments = result.assignments || [];
 
     let html = `
@@ -956,6 +959,7 @@ function updateMapButtons(running, paused) {
     const runBtn = document.getElementById('mapRunBtn');
     const pauseBtn = document.getElementById('mapPauseBtn');
     const resumeBtn = document.getElementById('mapResumeBtn');
+    const stopBtn = document.getElementById('mapStopBtn');
     if (runBtn) {
         runBtn.disabled = running && !paused;
         runBtn.style.opacity = (running && !paused) ? '0.5' : '1';
@@ -968,8 +972,11 @@ function updateMapButtons(running, paused) {
     }
     if (resumeBtn) {
         resumeBtn.disabled = !paused;
-        resumeBtn.disabled = !paused;
         resumeBtn.style.opacity = !paused ? '0.5' : '1';
+    }
+    if (stopBtn) {
+        stopBtn.disabled = !running && !paused;
+        stopBtn.style.opacity = (!running && !paused) ? '0.5' : '1';
     }
 }
 
@@ -993,11 +1000,16 @@ async function mapRunSchedule() {
         scheduleCompleted = false;
         document.getElementById('currentBatch').textContent = `批次: ${result.data.batch_id || '-'}`;
 
+        // 在仪表盘显示调度结果
+        renderScheduleResult(result.data);
+
         if (result.data.assignments && result.data.assignments.length > 0 && dynamicMap) {
             dynamicMap.setProgressCallback((progress) => {
                 if (progress >= 100) {
                     scheduleCompleted = true;
                     updateMapButtons(false, false);
+                    // 调度完成后刷新日志
+                    loadLogs();
                 }
             });
             dynamicMap.playSchedule(result.data.assignments);
@@ -1006,6 +1018,8 @@ async function mapRunSchedule() {
             updateVehicleStatusPanel();
         } else {
             updateMapButtons(false, false);
+            // 无动画时也刷新日志
+            loadLogs();
         }
     } else {
         alert('调度失败: ' + (result.error || '未知错误'));
@@ -1026,6 +1040,16 @@ function mapResumeSchedule() {
         dynamicMap.resumeSchedule();
         isScheduleRunning = true;
         updateMapButtons(true, false);
+    }
+}
+
+function mapStopSchedule() {
+    if (dynamicMap) {
+        dynamicMap.stopSchedule();
+        isScheduleRunning = false;
+        scheduleCompleted = true;
+        updateMapButtons(false, false);
+        loadLogs();
     }
 }
 
