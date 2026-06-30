@@ -64,13 +64,18 @@ class DynamicMap {
 
     resize() {
         const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.canvas.width = rect.width;
-        this.canvas.height = 550;
+        const w = rect.width > 0 ? rect.width : 800;
+        const h = 550;
+        if (this.canvas.width !== w) this.canvas.width = w;
+        if (this.canvas.height !== h) this.canvas.height = h;
+        this.canvas.style.width = w + 'px';
+        this.canvas.style.height = h + 'px';
     }
 
     setData(nodes, edges) {
         this.nodes = nodes;
         this.edges = edges;
+        this.resize();
         this.fitToView();
     }
 
@@ -617,4 +622,16 @@ let dynamicMap = null;
 
 function initMap() {
     dynamicMap = new DynamicMap('mapCanvas');
+    setTimeout(() => {
+        dynamicMap.resize();
+        if (dynamicMap.nodes.length > 0) dynamicMap.fitToView();
+    }, 100);
+    setTimeout(() => {
+        dynamicMap.resize();
+        if (dynamicMap.nodes.length > 0) dynamicMap.fitToView();
+    }, 500);
+    window.addEventListener('load', () => {
+        dynamicMap.resize();
+        if (dynamicMap.nodes.length > 0) dynamicMap.fitToView();
+    });
 }
