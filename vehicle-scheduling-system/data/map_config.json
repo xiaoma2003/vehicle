@@ -1,0 +1,31 @@
+{
+  "name": "示例调度地图",
+  "nodes": [
+    {"id": "S1", "name": "中央车站", "type": "station", "x": 100, "y": 200},
+    {"id": "S2", "name": "北站", "type": "station", "x": 100, "y": 400},
+    {"id": "S3", "name": "南站", "type": "station", "x": 100, "y": 50},
+    {"id": "S4", "name": "东站", "type": "station", "x": 400, "y": 200},
+    {"id": "S5", "name": "西站", "type": "station", "x": 50, "y": 200},
+    {"id": "M1", "name": "物料站A", "type": "material_station", "x": 250, "y": 100},
+    {"id": "M2", "name": "物料站B", "type": "material_station", "x": 250, "y": 300},
+    {"id": "C1", "name": "充电站", "type": "charge_station", "x": 180, "y": 200},
+    {"id": "F1", "name": "加油站", "type": "fuel_station", "x": 320, "y": 200},
+    {"id": "SW1", "name": "道岔1", "type": "switch", "x": 150, "y": 150},
+    {"id": "SW2", "name": "道岔2", "type": "switch", "x": 150, "y": 250}
+  ],
+  "edges": [
+    {"from": "S1", "to": "C1", "length": 200, "speed_limit": 600, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "C1", "to": "SW1", "length": 150, "speed_limit": 500, "slope": 0.02, "direction": "bidirectional"},
+    {"from": "C1", "to": "SW2", "length": 150, "speed_limit": 500, "slope": -0.02, "direction": "bidirectional"},
+    {"from": "SW1", "to": "M1", "length": 200, "speed_limit": 400, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "SW2", "to": "M2", "length": 200, "speed_limit": 400, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "M1", "to": "F1", "length": 300, "speed_limit": 600, "slope": 0.01, "direction": "bidirectional"},
+    {"from": "M2", "to": "F1", "length": 300, "speed_limit": 600, "slope": -0.01, "direction": "bidirectional"},
+    {"from": "F1", "to": "S4", "length": 200, "speed_limit": 800, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "S1", "to": "S2", "length": 500, "speed_limit": 700, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "S1", "to": "S3", "length": 400, "speed_limit": 700, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "S1", "to": "S5", "length": 150, "speed_limit": 600, "slope": 0.0, "direction": "bidirectional"},
+    {"from": "SW1", "to": "S2", "length": 600, "speed_limit": 500, "slope": 0.03, "direction": "forward"},
+    {"from": "SW2", "to": "S3", "length": 450, "speed_limit": 500, "slope": -0.03, "direction": "backward"}
+  ]
+}

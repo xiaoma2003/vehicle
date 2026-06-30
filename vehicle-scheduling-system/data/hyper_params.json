@@ -1,0 +1,13 @@
+{
+  "travel_time_precision": 2,
+  "default_priority": 50,
+  "BigM": 10000,
+  "slope_factor_uphill": 0.5,
+  "slope_factor_downhill": 0.3,
+  "switch_pass_time": 1,
+  "loading_time": 10,
+  "unloading_time": 8,
+  "battery_low_threshold": 100,
+  "fuel_low_threshold": 50,
+  "energy_consumption_rate": 0.5
+}

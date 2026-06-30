@@ -1,0 +1,110 @@
+{
+  "tasks": [
+    {
+      "id": "T001",
+      "name": "物料运输1",
+      "task_type": "normal",
+      "priority": 10,
+      "status": "pending",
+      "start_node": "S1",
+      "end_node": "S4",
+      "material_weight": 30,
+      "depends_on": []
+    },
+    {
+      "id": "T002",
+      "name": "物料运输2",
+      "task_type": "normal",
+      "priority": 20,
+      "status": "pending",
+      "start_node": "M1",
+      "end_node": "S2",
+      "material_weight": 25,
+      "depends_on": []
+    },
+    {
+      "id": "T003",
+      "name": "物料运输3",
+      "task_type": "normal",
+      "priority": 15,
+      "status": "pending",
+      "start_node": "S3",
+      "end_node": "M2",
+      "material_weight": 40,
+      "depends_on": []
+    },
+    {
+      "id": "T004",
+      "name": "紧急补给",
+      "task_type": "temporary",
+      "priority": 5,
+      "status": "pending",
+      "start_node": "M1",
+      "end_node": "S4",
+      "material_weight": 15,
+      "depends_on": [
+        "T001"
+      ]
+    },
+    {
+      "id": "T005",
+      "name": "返程运输",
+      "task_type": "normal",
+      "priority": 30,
+      "status": "pending",
+      "start_node": "S4",
+      "end_node": "S1",
+      "material_weight": 20,
+      "depends_on": [
+        "T001",
+        "T004"
+      ]
+    },
+    {
+      "id": "T006",
+      "name": "南站发货",
+      "task_type": "normal",
+      "priority": 25,
+      "status": "pending",
+      "start_node": "S3",
+      "end_node": "M1",
+      "material_weight": 35,
+      "depends_on": []
+    },
+    {
+      "id": "T007",
+      "name": "北站到货",
+      "task_type": "normal",
+      "priority": 35,
+      "status": "pending",
+      "start_node": "M2",
+      "end_node": "S2",
+      "material_weight": 28,
+      "depends_on": [
+        "T003"
+      ]
+    },
+    {
+      "id": "T008",
+      "name": "热启动任务",
+      "task_type": "normal",
+      "priority": 40,
+      "status": "running",
+      "start_node": "S5",
+      "end_node": "S1",
+      "material_weight": 20,
+      "depends_on": [],
+      "bound_locomotive": "L001"
+    },
+    {
+      "id": "TEST_TASK",
+      "task_type": "normal",
+      "priority": 30,
+      "status": "pending",
+      "start_node": "S1",
+      "end_node": "S2",
+      "material_weight": 20,
+      "depends_on": []
+    }
+  ]
+}

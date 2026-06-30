@@ -1,0 +1,76 @@
+{
+  "locomotives": [
+    {
+      "id": "L001",
+      "traction_type": "electric",
+      "Q": 50,
+      "max_speed": 800,
+      "initial_node": "S1",
+      "battery": 1000,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L002",
+      "traction_type": "electric",
+      "Q": 40,
+      "max_speed": 900,
+      "initial_node": "S4",
+      "battery": 800,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L003",
+      "traction_type": "diesel",
+      "Q": 60,
+      "max_speed": 700,
+      "initial_node": "S2",
+      "fuel_tank": 500,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L004",
+      "traction_type": "diesel",
+      "Q": 55,
+      "max_speed": 650,
+      "initial_node": "S3",
+      "fuel_tank": 450,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L005",
+      "traction_type": "electric",
+      "Q": 45,
+      "max_speed": 850,
+      "initial_node": "C1",
+      "battery": 950,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": "T008",
+      "task_phase": "transporting"
+    },
+    {
+      "id": "TEST01",
+      "traction_type": "electric",
+      "Q": 30,
+      "max_speed": 750,
+      "initial_node": "S1",
+      "battery": 600,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    }
+  ]
+}
