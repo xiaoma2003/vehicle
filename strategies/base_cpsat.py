@@ -155,20 +155,47 @@ class CPSATScheduler:
         self.BigM = hyper_params["BigM"]
         self.precision = hyper_params["travel_time_precision"]
 
-    def _ceil_to_precision(self, minutes: float) -> int:
+    def _ceil(self, minutes: float) -> int:
         return int(math.ceil(minutes / self.precision) * self.precision)
 
     def solve(self) -> Dict[str, Any]:
         model = cp_model.CpModel()
 
+        # ===== 预处理：排除已绑定任务的机车 =====
+
+        # 已分配的任务（热启动，不参与调度）
+        assigned_tasks = {}
+        bound_loco_ids = set()
+        for t in self.tasks:
+            if t.get("bound_locomotive") and t["status"] == "running":
+                bound_loco_ids.add(t["bound_locomotive"])
+                loco = next((l for l in self.locomotives if l["id"] == t["bound_locomotive"]), None)
+                if loco:
+                    travel_time = self._ceil(
+                        self.precomputed_paths[loco["id"]][t["start_node"]][t["end_node"]]["time"]
+                    )
+                    loading = self.hyper_params["loading_time"]
+                    unloading = self.hyper_params["unloading_time"]
+                    assigned_tasks[t["id"]] = {
+                        "task": t,
+                        "locomotive": loco,
+                        "start_time": 0,
+                        "loading_end": loading,
+                        "transport_end": loading + travel_time,
+                        "unloading_end": loading + travel_time + unloading
+                    }
+
         schedulable_locomotives = [
             l for l in self.locomotives
-            if l.get("is_powered_on", True) and l.get("is_schedulable", True)
+            if l.get("is_powered_on", True)
+            and l.get("is_schedulable", True)
+            and l["id"] not in bound_loco_ids
         ]
 
         active_tasks = [
             t for t in self.tasks
             if t["status"] in ["pending", "running", "paused"]
+            and t["id"] not in assigned_tasks
         ]
 
         if not active_tasks:
@@ -187,96 +214,132 @@ class CPSATScheduler:
                 "message": "没有可调度的机车"
             }
 
-        task_vars = {}
-        for task in active_tasks:
-            tid = task["id"]
-            task_vars[tid] = {
-                "assigned_loco": model.NewIntVar(0, len(schedulable_locomotives) - 1, f"loco_{tid}"),
-                "start_time": model.NewIntVar(0, self.BigM, f"start_{tid}"),
-                "loading_end": model.NewIntVar(0, self.BigM, f"load_end_{tid}"),
-                "transport_end": model.NewIntVar(0, self.BigM, f"trans_end_{tid}"),
-                "unloading_end": model.NewIntVar(0, self.BigM, f"unload_end_{tid}"),
-                "is_assigned": model.NewBoolVar(f"assigned_{tid}")
-            }
+        num_locos = len(schedulable_locomotives)
+        loco_index = {l["id"]: i for i, l in enumerate(schedulable_locomotives)}
+
+        # ===== 决策变量 =====
+        # task -> locomotive index (0..num_locos-1)
+        loco_assign = {}
+        # 任务执行时间窗口 [start, end]
+        task_start = {}
+        task_end = {}
+
+        for tid in [t["id"] for t in active_tasks]:
+            loco_assign[tid] = model.NewIntVar(0, num_locos - 1, f"assign_{tid}")
+            task_start[tid] = model.NewIntVar(0, self.BigM, f"start_{tid}")
+            task_end[tid] = model.NewIntVar(0, self.BigM, f"end_{tid}")
 
         makespan = model.NewIntVar(0, self.BigM, "makespan")
 
-        for i, loco in enumerate(schedulable_locomotives):
-            loco_id = loco["id"]
-            loco_tasks = [t for t in active_tasks]
-            for idx, task in enumerate(loco_tasks):
+        # ===== 预计算时间常数 =====
+        # loco -> task: 空驶时间、作业时间
+        empty_times = {}   # loco_id, tid -> 空驶时间（初始位置->任务起点）
+        job_times = {}     # loco_id, tid -> 有载作业时间（起点->终点）
+        seq_empty = {}     # loco_id, tid1, tid2 -> tid1结束后到tid2起点的空驶时间
+
+        loading = self.hyper_params["loading_time"]
+        unloading = self.hyper_params["unloading_time"]
+
+        for loco in schedulable_locomotives:
+            lid = loco["id"]
+            empty_times[lid] = {}
+            job_times[lid] = {}
+            seq_empty[lid] = {}
+
+            for task in active_tasks:
                 tid = task["id"]
-                tv = task_vars[tid]
-                is_this_loco = model.NewBoolVar(f"loco_{loco_id}_task_{tid}")
-                model.Add(tv["assigned_loco"] == i).OnlyEnforceIf(is_this_loco)
-                model.Add(tv["assigned_loco"] != i).OnlyEnforceIf(is_this_loco.Not())
+                empty_times[lid][tid] = self._ceil(
+                    self.precomputed_paths[lid][loco["initial_node"]][task["start_node"]]["time"]
+                )
+                job_times[lid][tid] = self._ceil(
+                    self.precomputed_paths[lid][task["start_node"]][task["end_node"]]["time"]
+                )
 
-                path_info = self.precomputed_paths[loco_id][task["start_node"]][task["end_node"]]
-                empty_path_info = self.precomputed_paths[loco_id][loco["initial_node"]][task["start_node"]]
+            for t1 in active_tasks:
+                t1id = t1["id"]
+                seq_empty[lid][t1id] = {}
+                for t2 in active_tasks:
+                    t2id = t2["id"]
+                    seq_empty[lid][t1id][t2id] = self._ceil(
+                        self.precomputed_paths[lid][t1["end_node"]][t2["start_node"]]["time"]
+                    )
 
-                travel_time = self._ceil_to_precision(path_info["time"])
-                empty_travel_time = self._ceil_to_precision(empty_path_info["time"])
-                loading_time = self.hyper_params["loading_time"]
-                unloading_time = self.hyper_params["unloading_time"]
-
-                model.Add(tv["loading_end"] == tv["start_time"] + loading_time).OnlyEnforceIf(is_this_loco)
-                model.Add(tv["transport_end"] == tv["loading_end"] + travel_time).OnlyEnforceIf(is_this_loco)
-                model.Add(tv["unloading_end"] == tv["transport_end"] + unloading_time).OnlyEnforceIf(is_this_loco)
-
-                model.Add(tv["start_time"] >= 0).OnlyEnforceIf(is_this_loco)
-
+        # ===== 约束1+5: 时间链 + 载重约束（合并，用 OnlyEnforceIf 统一表达）=====
+        # 对于能承载该任务的机车: 添加时间链约束
+        # 对于不能承载的机车: 禁止赋值
         for task in active_tasks:
             tid = task["id"]
-            tv = task_vars[tid]
-            model.Add(tv["is_assigned"] == 1)
-            model.Add(tv["unloading_end"] <= makespan)
+            weight = task["material_weight"]
+            for i, loco in enumerate(schedulable_locomotives):
+                lid = loco["id"]
+                can_carry = (weight <= loco["Q"])
+                b = model.NewBoolVar(f"b_{tid}_{lid}")
+                # 建立 b 与 loco_assign 的等价关系
+                model.Add(loco_assign[tid] == i).OnlyEnforceIf(b)
+                model.Add(loco_assign[tid] != i).OnlyEnforceIf(b.Not())
 
+                if can_carry:
+                    # 能承载: 添加时间链约束
+                    model.Add(
+                        task_end[tid] ==
+                        task_start[tid] + empty_times[lid][tid]
+                        + loading + job_times[lid][tid] + unloading
+                    ).OnlyEnforceIf(b)
+                else:
+                    # 不能承载: 强制 b = False（即 loco_assign != i）
+                    model.Add(b == 0)  # 禁止此分配
+
+        # ===== 约束2: makespan = max(task_end) =====
+
+        for tid in [t["id"] for t in active_tasks]:
+            model.Add(task_end[tid] <= makespan)
+        for tid, info in assigned_tasks.items():
+            model.Add(info["unloading_end"] <= makespan)
+
+        # ===== 约束3: 任务依赖 =====
         for task in active_tasks:
-            tid = task["id"]
-            tv = task_vars[tid]
             for dep_id in task.get("depends_on", []):
-                if dep_id in task_vars:
-                    dep_tv = task_vars[dep_id]
-                    model.Add(tv["start_time"] >= dep_tv["unloading_end"])
+                if dep_id in task_end:
+                    model.Add(task_start[task["id"]] >= task_end[dep_id])
 
+        # ===== 约束4: 同机车任务不重叠（使用顺序变量选择方向）=====
+        # 若两个任务被分配到同一台机车，必须有执行顺序
         for i, loco in enumerate(schedulable_locomotives):
-            loco_id = loco["id"]
-            loco_task_vars = [(t["id"], task_vars[t["id"]]) for t in active_tasks]
-            for idx1, (tid1, tv1) in enumerate(loco_task_vars):
-                for idx2, (tid2, tv2) in enumerate(loco_task_vars):
+            lid = loco["id"]
+            tids = [t["id"] for t in active_tasks]
+            for idx1, tid1 in enumerate(tids):
+                for idx2, tid2 in enumerate(tids):
                     if idx1 >= idx2:
                         continue
-                    same_loco = model.NewBoolVar(f"same_loco_{tid1}_{tid2}")
-                    both_assigned = model.NewBoolVar(f"both_assigned_{tid1}_{tid2}")
-                    model.AddBoolAnd([tv1["is_assigned"], tv2["is_assigned"]]).OnlyEnforceIf(both_assigned)
-                    model.AddBoolOr([tv1["is_assigned"].Not(), tv2["is_assigned"].Not()]).OnlyEnforceIf(both_assigned.Not())
 
-                    same_loco_1 = model.NewBoolVar(f"sl1_{tid1}_{tid2}")
-                    same_loco_2 = model.NewBoolVar(f"sl2_{tid1}_{tid2}")
-                    model.Add(tv1["assigned_loco"] == i).OnlyEnforceIf(same_loco_1)
-                    model.Add(tv1["assigned_loco"] != i).OnlyEnforceIf(same_loco_1.Not())
-                    model.Add(tv2["assigned_loco"] == i).OnlyEnforceIf(same_loco_2)
-                    model.Add(tv2["assigned_loco"] != i).OnlyEnforceIf(same_loco_2.Not())
-                    model.AddBoolAnd([same_loco_1, same_loco_2]).OnlyEnforceIf(same_loco)
-                    model.AddBoolOr([same_loco_1.Not(), same_loco_2.Not()]).OnlyEnforceIf(same_loco.Not())
+                    # b1 = (loco_assign[tid1] == i)
+                    b1 = model.NewBoolVar(f"b1_{lid}_{tid1}")
+                    model.Add(loco_assign[tid1] == i).OnlyEnforceIf(b1)
+                    model.Add(loco_assign[tid1] != i).OnlyEnforceIf(b1.Not())
+                    # b2 = (loco_assign[tid2] == i)
+                    b2 = model.NewBoolVar(f"b2_{lid}_{tid2}")
+                    model.Add(loco_assign[tid2] == i).OnlyEnforceIf(b2)
+                    model.Add(loco_assign[tid2] != i).OnlyEnforceIf(b2.Not())
 
-                    order = model.NewBoolVar(f"order_{tid1}_{tid2}")
-                    condition = model.NewBoolVar(f"cond_{tid1}_{tid2}")
-                    model.AddBoolAnd([both_assigned, same_loco]).OnlyEnforceIf(condition)
-                    model.AddBoolOr([both_assigned.Not(), same_loco.Not()]).OnlyEnforceIf(condition.Not())
+                    # both = b1 AND b2：两个任务都在同一台机车上
+                    both = model.NewBoolVar(f"both_{lid}_{tid1}_{tid2}")
+                    model.AddBoolAnd([b1, b2]).OnlyEnforceIf(both)
+                    model.AddBoolOr([b1.Not(), b2.Not()]).OnlyEnforceIf(both.Not())
 
-                    model.Add(tv1["unloading_end"] <= tv2["start_time"]).OnlyEnforceIf([condition, order])
-                    model.Add(tv2["unloading_end"] <= tv1["start_time"]).OnlyEnforceIf([condition, order.Not()])
+                    # o = 顺序变量：o=True 表示 tid1 先执行，o=False 表示 tid2 先执行
+                    o = model.NewBoolVar(f"o_{lid}_{tid1}_{tid2}")
+                    
+                    t1_to_t2 = seq_empty[lid][tid1][tid2]
+                    t2_to_t1 = seq_empty[lid][tid2][tid1]
 
-        for task in active_tasks:
-            tid = task["id"]
-            tv = task_vars[tid]
-            for i, loco in enumerate(schedulable_locomotives):
-                is_loco = model.NewBoolVar(f"check_cap_{tid}_{loco['id']}")
-                model.Add(tv["assigned_loco"] == i).OnlyEnforceIf(is_loco)
-                model.Add(tv["assigned_loco"] != i).OnlyEnforceIf(is_loco.Not())
-                if task["material_weight"] > loco["Q"]:
-                    model.Add(tv["is_assigned"] == 0).OnlyEnforceIf(is_loco)
+                    # 若 both=True 且 o=True：tid1 先执行，tid2.start >= tid1.end + t1_to_t2
+                    model.Add(
+                        task_start[tid2] >= task_end[tid1] + t1_to_t2
+                    ).OnlyEnforceIf(both, o)
+                    # 若 both=True 且 o=False：tid2 先执行，tid1.start >= tid2.end + t2_to_t1
+                    model.Add(
+                        task_start[tid1] >= task_end[tid2] + t2_to_t1
+                    ).OnlyEnforceIf(both, o.Not())
 
         model.Minimize(makespan)
 
@@ -290,28 +353,48 @@ class CPSATScheduler:
             assignments = []
             for task in active_tasks:
                 tid = task["id"]
-                tv = task_vars[tid]
-                if solver.Value(tv["is_assigned"]):
-                    loco_idx = solver.Value(tv["assigned_loco"])
-                    loco = schedulable_locomotives[loco_idx]
-                    path_info = self.precomputed_paths[loco["id"]][task["start_node"]][task["end_node"]]
-                    assignments.append({
-                        "task_id": tid,
-                        "locomotive_id": loco["id"],
-                        "start_time": solver.Value(tv["start_time"]),
-                        "loading_end": solver.Value(tv["loading_end"]),
-                        "transport_end": solver.Value(tv["transport_end"]),
-                        "unloading_end": solver.Value(tv["unloading_end"]),
-                        "path": path_info["path"],
-                        "segments": path_info["segments"]
-                    })
+                loco_idx = solver.Value(loco_assign[tid])
+                loco = schedulable_locomotives[loco_idx]
+                start = solver.Value(task_start[tid])
+                end = solver.Value(task_end[tid])
+
+                path_info = self.precomputed_paths[loco["id"]][task["start_node"]][task["end_node"]]
+                loading_end = start + empty_times[loco["id"]][tid] + loading
+                transport_end = loading_end + job_times[loco["id"]][tid]
+
+                assignments.append({
+                    "task_id": tid,
+                    "locomotive_id": loco["id"],
+                    "start_time": start,
+                    "loading_end": loading_end,
+                    "transport_end": transport_end,
+                    "unloading_end": end,
+                    "path": path_info["path"],
+                    "segments": path_info["segments"]
+                })
+
+            # 加上热启动（已分配）的任务
+            for tid, info in assigned_tasks.items():
+                loco = info["locomotive"]
+                path_info = self.precomputed_paths[loco["id"]][info["task"]["start_node"]][info["task"]["end_node"]]
+                assignments.append({
+                    "task_id": tid,
+                    "locomotive_id": loco["id"],
+                    "start_time": info["start_time"],
+                    "loading_end": info["loading_end"],
+                    "transport_end": info["transport_end"],
+                    "unloading_end": info["unloading_end"],
+                    "path": path_info["path"],
+                    "segments": path_info["segments"]
+                })
 
             return {
                 "solve_status": "optimal" if status == cp_model.OPTIMAL else "feasible",
-                "makespan": solver.Value(makespan),
+                "makespan": max(solver.Value(makespan),
+                               max((info["unloading_end"] for info in assigned_tasks.values()), default=0)),
                 "assignments": assignments,
                 "num_tasks": len(assignments),
-                "num_locomotives": len(schedulable_locomotives)
+                "num_locomotives": len(schedulable_locomotives) + len(assigned_tasks)
             }
         else:
             return {
