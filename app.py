@@ -223,6 +223,38 @@ def check_direction():
     return jsonify(result)
 
 
+@app.route('/api/logs/delete/<int:log_id>', methods=['DELETE'])
+def delete_log(log_id):
+    success = api.db.delete_log(log_id)
+    if success:
+        return jsonify({"success": True, "message": "日志删除成功"})
+    else:
+        return jsonify({"success": False, "error": "日志不存在"})
+
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_all_logs():
+    count = api.db.clear_all_logs()
+    return jsonify({"success": True, "count": count, "message": f"已清空 {count} 条日志"})
+
+@app.route('/api/locomotives/update', methods=['POST'])
+def update_locomotive():
+    data = request.get_json()
+    result = api.update_locomotive(data)
+    return jsonify(result)
+
+@app.route('/api/comparison/export/<batch_id>', methods=['GET'])
+def export_comparison_report(batch_id):
+    result = api.get_batch_history(batch_id)
+    if not result.get('success'):
+        return jsonify(result), 404
+    
+    # Export as JSON format
+    output_path = os.path.join(config_dir, f'comparison_report_{batch_id}.json')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(result['data'], f, ensure_ascii=False, indent=2)
+    return send_file(output_path, as_attachment=True,
+                     download_name=f'comparison_report_{batch_id}.json')
+
 @app.route('/api/export/<batch_id>', methods=['GET'])
 def export_batch(batch_id):
     result = api.get_batch_history(batch_id)

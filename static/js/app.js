@@ -274,30 +274,63 @@ async function loadLocomotives() {
 }
 
 function renderLocomotivesList(locomotives) {
-    const list = document.getElementById('locomotivesList');
-    if (!list) return;
+    const list = document.getElementById('locomotive-list');
+    if (!list) {
+        // fallback: try old ID
+        const oldList = document.getElementById('locomotivesList');
+        if (oldList) {
+            return renderLocomotivesListOld(locomotives, oldList);
+        }
+        return;
+    }
 
-    const typeFilter = document.getElementById('locoTypeFilter')?.value || '';
-    const filtered = locomotives.filter(l => !typeFilter || l.traction_type === typeFilter);
-
-    if (filtered.length === 0) {
+    if (locomotives.length === 0) {
         list.innerHTML = '<p class="text-muted">暂无机车</p>';
         return;
     }
 
-    list.innerHTML = filtered.map(loco => {
+    list.innerHTML = locomotives.map(loco => {
         const isElectric = loco.traction_type === 'electric';
         return `
             <div class="loco-item">
                 <div class="loco-header">
                     <span class="task-id">${loco.id}</span>
                     <span class="vehicle-type ${loco.traction_type}">${isElectric ? '电动机车' : '柴油机车'}</span>
+                    <button class="btn btn-sm btn-primary" onclick="editLocomotive('${loco.id}')">编辑</button>
                 </div>
                 <div class="loco-details">
                     <div>最大速度: ${loco.max_speed} m/min</div>
                     <div>载重能力: ${loco.Q} 吨</div>
                     <div>当前位置: ${loco.initial_node}</div>
                     <div>状态: ${loco.is_powered_on ? '🟢 开机' : '🔴 关机'} | ${loco.is_schedulable ? '可调度' : '不可调度'}</div>
+                    ${isElectric ? `<div>电池: ${loco.battery} kWh</div>` : `<div>油量: ${loco.fuel_tank} L</div>`}
+                    ${loco.current_task ? `<div>当前任务: ${loco.current_task} (${loco.task_phase || '-'})</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderLocomotivesListOld(locomotives, list) {
+    if (locomotives.length === 0) {
+        list.innerHTML = '<p class="text-muted">暂无机车</p>';
+        return;
+    }
+
+    list.innerHTML = locomotives.map(loco => {
+        const isElectric = loco.traction_type === 'electric';
+        return `
+            <div class="loco-item">
+                <div class="loco-header">
+                    <span class="task-id">${loco.id}</span>
+                    <span class="vehicle-type ${loco.traction_type}">${isElectric ? '电动机车' : '柴油机车'}</span>
+                    <button class="btn btn-sm btn-primary" onclick="editLocomotive('${loco.id}')">编辑</button>
+                </div>
+                <div class="loco-details">
+                    <div>最大速度: ${loco.max_speed} m/min</div>
+                    <div>载重能力: ${loco.Q} 吨</div>
+                    <div>当前位置: ${loco.initial_node}</div>
+                    <div>状态: ${loco.is_powered_on ? '电机' : '关机'} | ${loco.is_schedulable ? '可调度' : '不可调度'}</div>
                     ${isElectric ? `<div>电池: ${loco.battery} kWh</div>` : `<div>油量: ${loco.fuel_tank} L</div>`}
                     ${loco.current_task ? `<div>当前任务: ${loco.current_task} (${loco.task_phase || '-'})</div>` : ''}
                 </div>
@@ -852,20 +885,23 @@ function loadLogsPage(page) {
 }
 
 function renderLogsList(logs) {
-    const list = document.getElementById('logsList');
+    const list = document.getElementById('logs-table tbody');
     if (!list) return;
 
     if (logs.length === 0) {
-        list.innerHTML = '<p class="text-muted">暂无日志</p>';
+        list.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无日志</td></tr>';
         return;
     }
 
     list.innerHTML = logs.map(log => `
-        <div class="log-item ${log.log_level}">
-            <span class="log-time">${log.created_at}</span>
-            <span class="log-level">[${log.log_level}]</span>
-            <span>${log.message}</span>
-        </div>
+        <tr class="log-level-${(log.log_level || '').toLowerCase()}">
+            <td>${log.id}</td>
+            <td>${log.created_at}</td>
+            <td>${log.log_level || ''}</td>
+            <td>${log.module || ''}</td>
+            <td>${log.message || ''}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteLog(${log.id})">删除</button></td>
+        </tr>
     `).join('');
 }
 
@@ -992,3 +1028,394 @@ function mapResumeSchedule() {
         updateMapButtons(true, false);
     }
 }
+
+// ==================== 多策略对比（新版） ====================
+const COMPARISON_STRATEGIES = [
+    { key: 'cpsat', name: 'CP-SAT基准策略', isBaseline: true, desc: 'Dijkstra + Google OR-Tools CP-SAT约束规划' },
+    { key: 'greedy', name: '贪心算法', isBaseline: false, desc: '基于优先级和最短路径的贪心调度' },
+    { key: 'genetic', name: '遗传算法', isBaseline: false, desc: '进化算法搜索最优调度方案' },
+    { key: 'simulated_annealing', name: '模拟退火', isBaseline: false, desc: '基于模拟退火的调度优化' }
+];
+
+let comparisonChartInstances = {};
+
+function initComparisonTab() {
+    const container = document.getElementById('strategy-checkboxes');
+    if (!container) return;
+    container.innerHTML = COMPARISON_STRATEGIES.map(s => `
+        <label class="strategy-checkbox-item ${s.isBaseline ? 'baseline-strategy' : ''}">
+            <input type="checkbox" class="cmp-checkbox" data-key="${s.key}"
+                   ${s.isBaseline ? 'checked disabled' : ''}>
+            <span class="strategy-name">${s.name}</span>
+            <span class="strategy-desc">${s.desc}</span>
+            ${s.isBaseline ? '<span class="baseline-tag">基准</span>' : ''}
+        </label>
+    `).join('');
+
+    container.querySelectorAll('.cmp-checkbox:not([disabled])').forEach(cb => {
+        cb.addEventListener('change', updateComparisonBtnState);
+    });
+
+    document.getElementById('btn-run-comparison').addEventListener('click', runComparisonV2);
+    document.getElementById('btn-export-comparison').addEventListener('click', exportComparison);
+}
+
+function updateComparisonBtnState() {
+    const checked = document.querySelectorAll('.cmp-checkbox:checked').length;
+    const btn = document.getElementById('btn-run-comparison');
+    if (btn) btn.disabled = checked < 2;
+}
+
+function getSelectedStrategies() {
+    const checked = document.querySelectorAll('.cmp-checkbox:checked');
+    return Array.from(checked).map(cb => cb.dataset.key);
+}
+
+function resetComparisonCharts() {
+    Object.values(comparisonChartInstances).forEach(c => {
+        try { c.destroy(); } catch (e) { }
+    });
+    comparisonChartInstances = {};
+}
+
+async function runComparisonV2() {
+    const strategies = getSelectedStrategies();
+    if (strategies.length < 2) {
+        alert('请至少勾选基准策略和1个候选策略');
+        return;
+    }
+
+    resetComparisonCharts();
+
+    const progressDiv = document.getElementById('comparison-progress');
+    const progressFill = document.getElementById('comparison-progress-fill');
+    const progressText = document.getElementById('comparison-progress-text');
+    const resultsDiv = document.getElementById('comparison-results');
+    const btn = document.getElementById('btn-run-comparison');
+    const btnExport = document.getElementById('btn-export-comparison');
+
+    if (progressDiv) progressDiv.style.display = 'block';
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    if (btn) btn.disabled = true;
+    if (btnExport) btnExport.disabled = true;
+    if (progressFill) progressFill.style.width = '0%';
+    if (progressText) progressText.textContent = '正在运行...';
+
+    const allResults = [];
+    for (let i = 0; i < strategies.length; i++) {
+        const key = strategies[i];
+        const info = COMPARISON_STRATEGIES.find(s => s.key === key);
+        if (progressText) progressText.textContent = `正在运行 ${info ? info.name : key}...`;
+        if (progressFill) progressFill.style.width = `${Math.round((i / strategies.length) * 100)}%`;
+
+        try {
+            const resp = await fetch('/api/schedule/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ strategy: key })
+            });
+            const respData = await resp.json();
+            const result = respData.success ? respData.data : respData;
+            allResults.push(result);
+        } catch (e) {
+            allResults.push({ strategy_name: key, solve_status: 'error', error: e.message });
+        }
+    }
+
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressText) progressText.textContent = '对比完成!';
+    setTimeout(() => { if (progressDiv) progressDiv.style.display = 'none'; }, 1000);
+
+    renderComparisonV2(allResults);
+    if (btn) btn.disabled = false;
+    if (btnExport) btnExport.disabled = false;
+}
+
+function renderComparisonV2(results) {
+    const resultsDiv = document.getElementById('comparison-results');
+    if (!resultsDiv) return;
+    resultsDiv.style.display = 'block';
+
+    const tbody = document.querySelector('#comparison-table tbody');
+    if (tbody) {
+        tbody.innerHTML = results.map(r => {
+            const isBaseline = COMPARISON_STRATEGIES.find(s => s.key === r.strategy_name)?.isBaseline;
+            const cls = isBaseline ? 'baseline-row' : '';
+            const status = r.solve_status || 'error';
+            const st = r.solve_time !== undefined && r.solve_time !== null ? r.solve_time.toFixed(4) : '-';
+            const en = r.energy_consumption !== undefined ? r.energy_consumption : '-';
+            const da = r.dynamic_adaptability !== undefined ? r.dynamic_adaptability : '-';
+            return `<tr class="${cls}">
+                <td>${r.strategy_display_name || r.strategy_name}</td>
+                <td>${r.makespan !== undefined ? r.makespan : '-'}</td>
+                <td>${st}</td>
+                <td>${r.num_tasks || '-'}</td>
+                <td class="status-${status}">${status}</td>
+                <td>${en}</td>
+                <td>${da}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    const validResults = results.filter(r => r.solve_status !== 'error' && r.makespan >= 0);
+    if (validResults.length === 0) return;
+
+    const baseline = results.find(r => COMPARISON_STRATEGIES.find(s => s.key === r.strategy_name)?.isBaseline);
+    const labels = validResults.map(r => r.strategy_display_name || r.strategy_name);
+    const isBaselineFlags = validResults.map(r => COMPARISON_STRATEGIES.find(s => s.key === r.strategy_name)?.isBaseline || false);
+
+    const barColors = labels.map((_, i) => isBaselineFlags[i] ? 'rgba(220, 53, 69, 0.8)' : 'rgba(54, 162, 235, 0.8)');
+    const barBorders = labels.map((_, i) => isBaselineFlags[i] ? 'rgba(220, 53, 69, 1)' : 'rgba(54, 162, 235, 1)');
+
+    const normalize = (values, invert) => {
+        const max = Math.max(...values.filter(v => v !== undefined && v !== null), 1);
+        const min = Math.min(...values.filter(v => v !== undefined && v !== null), 0);
+        const range = max - min || 1;
+        return values.map(v => {
+            if (v === undefined || v === null) return 0;
+            return invert ? Math.round((1 - (v - min) / range) * 100) : Math.round(((v - min) / range) * 100);
+        });
+    };
+
+    const makespans = validResults.map(r => r.makespan);
+    const solveTimes = validResults.map(r => r.solve_time);
+    const energies = validResults.map(r => r.energy_consumption || 0);
+    const adaptabilities = validResults.map(r => r.dynamic_adaptability || 0);
+
+    // 求解速度柱状图
+    const ctx1 = document.getElementById('chart-solve-time');
+    if (ctx1) {
+        comparisonChartInstances.solveTime = new Chart(ctx1, {
+            type: 'bar', data: { labels, datasets: [{ label: '求解时间 (s)', data: solveTimes, backgroundColor: barColors, borderColor: barBorders, borderWidth: 1 }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: '秒' } } } }
+        });
+    }
+
+    // Makespan 柱状图
+    const ctx2 = document.getElementById('chart-makespan');
+    if (ctx2) {
+        comparisonChartInstances.makespan = new Chart(ctx2, {
+            type: 'bar', data: { labels, datasets: [{ label: 'Makespan', data: makespans, backgroundColor: barColors, borderColor: barBorders, borderWidth: 1 }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'makespan' } } } }
+        });
+    }
+
+    // 能耗柱状图
+    const ctx3 = document.getElementById('chart-energy');
+    if (ctx3) {
+        comparisonChartInstances.energy = new Chart(ctx3, {
+            type: 'bar', data: { labels, datasets: [{ label: '总能耗', data: energies, backgroundColor: barColors, borderColor: barBorders, borderWidth: 1 }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: '能耗' } } } }
+        });
+    }
+
+    // 动态适应性柱状图
+    const ctx4 = document.getElementById('chart-adaptability');
+    if (ctx4) {
+        comparisonChartInstances.adaptability = new Chart(ctx4, {
+            type: 'bar', data: { labels, datasets: [{ label: '动态适应性', data: adaptabilities, backgroundColor: barColors, borderColor: barBorders, borderWidth: 1 }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: '适应性指数' } } } }
+        });
+    }
+
+    // 雷达图
+    const ctx5 = document.getElementById('chart-radar');
+    if (ctx5) {
+        const radarLabels = ['Makespan质量', '求解速度', '任务完成率', '能耗效率', '动态适应性'];
+        const totalTasks = Math.max(...validResults.map(r => r.num_tasks || 1), 1);
+        const radarDatasets = validResults.map((r, i) => ({
+            label: r.strategy_display_name || r.strategy_name,
+            data: [normalize(makespans, true)[i], normalize(solveTimes, true)[i], Math.round((r.num_tasks || 0) / totalTasks * 100), normalize(energies, true)[i], normalize(adaptabilities, false)[i]],
+            backgroundColor: isBaselineFlags[i] ? 'rgba(220, 53, 69, 0.2)' : 'rgba(54, 162, 235, 0.2)',
+            borderColor: isBaselineFlags[i] ? 'rgba(220, 53, 69, 1)' : 'rgba(54, 162, 235, 1)',
+            borderWidth: 2
+        }));
+        comparisonChartInstances.radar = new Chart(ctx5, {
+            type: 'radar', data: { labels: radarLabels, datasets: radarDatasets },
+            options: { responsive: true, scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 20 } } } }
+        });
+    }
+
+    // 超越基准高亮
+    if (baseline) {
+        highlightBeatBaseline(results, baseline, labels, isBaselineFlags);
+    }
+}
+
+function highlightBeatBaseline(results, baseline, labels, isBaselineFlags) {
+    const tbody = document.querySelector('#comparison-table tbody');
+    if (!tbody) return;
+    const rows = tbody.querySelectorAll('tr');
+    results.forEach((r, i) => {
+        if (isBaselineFlags[i]) return;
+        const row = rows[i];
+        if (!row) return;
+        let beat = false;
+        if (r.makespan >= 0 && r.makespan < baseline.makespan) beat = true;
+        if (r.solve_time !== undefined && r.solve_time < baseline.solve_time) beat = true;
+        if (r.energy_consumption !== undefined && baseline.energy_consumption !== undefined && r.energy_consumption < baseline.energy_consumption) beat = true;
+        if (r.dynamic_adaptability !== undefined && baseline.dynamic_adaptability !== undefined && r.dynamic_adaptability > baseline.dynamic_adaptability) beat = true;
+        if (beat) {
+            row.classList.add('beat-baseline');
+            const cells = row.querySelectorAll('td');
+            if (r.makespan >= 0 && r.makespan < baseline.makespan && cells[1]) cells[1].innerHTML += ' <span class="beat-badge">超越!</span>';
+            if (r.solve_time !== undefined && r.solve_time < baseline.solve_time && cells[2]) cells[2].innerHTML += ' <span class="beat-badge">超越!</span>';
+        }
+    });
+}
+
+function exportComparison() {
+    const tbody = document.querySelector('#comparison-table tbody');
+    if (!tbody || !tbody.children.length) {
+        alert('请先运行对比'); return;
+    }
+    const rows = tbody.querySelectorAll('tr');
+    const data = [];
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 5) {
+            data.push({
+                strategy: (cells[0].textContent || '').replace(' 超越!', ''),
+                makespan: (cells[1].textContent || '').replace(' 超越!', ''),
+                solve_time: (cells[2].textContent || '').replace(' 超越!', ''),
+                num_tasks: cells[3].textContent,
+                status: cells[4].textContent,
+                energy: cells[5] ? cells[5].textContent : '-',
+                adaptability: cells[6] ? cells[6].textContent : '-'
+            });
+        }
+    });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'comparison_report.json'; a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ==================== 日志删除 ====================
+async function deleteLog(logId) {
+    if (!confirm('确定删除此日志?')) return;
+    try {
+        const resp = await fetch(`/api/logs/delete/${logId}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            loadLogs();
+        } else {
+            alert('删除失败: ' + (data.error || '未知错误'));
+        }
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+async function clearAllLogs() {
+    if (!confirm('确定清空所有日志? 此操作不可撤销!')) return;
+    try {
+        const resp = await fetch('/api/logs/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            alert(data.message);
+            loadLogs();
+        } else {
+            alert('清空失败');
+        }
+    } catch (e) {
+        alert('清空失败: ' + e.message);
+    }
+}
+
+// ==================== 机车编辑 ====================
+async function editLocomotive(locoId) {
+    if (!currentLocomotivesData || !currentLocomotivesData.locomotives) {
+        alert('机车数据未加载'); return;
+    }
+    const loco = currentLocomotivesData.locomotives.find(l => l.id === locoId);
+    if (!loco) { alert('机车不存在'); return; }
+
+    document.getElementById('loco-edit-id').value = loco.id;
+    document.getElementById('loco-edit-traction').value = loco.traction_type || 'electric';
+    document.getElementById('loco-edit-q').value = loco.Q || 50;
+    document.getElementById('loco-edit-speed').value = loco.max_speed || 800;
+    document.getElementById('loco-edit-initial-node').value = loco.initial_node || '';
+    document.getElementById('loco-edit-battery').value = loco.battery || 0;
+    document.getElementById('loco-edit-fuel').value = loco.fuel_tank || 0;
+    document.getElementById('loco-edit-powered').checked = loco.is_powered_on !== false;
+    document.getElementById('loco-edit-schedulable').checked = loco.is_schedulable !== false;
+
+    const isElectric = (loco.traction_type || 'electric') === 'electric';
+    document.getElementById('loco-edit-battery-group').style.display = isElectric ? '' : 'none';
+    document.getElementById('loco-edit-fuel-group').style.display = isElectric ? 'none' : '';
+
+    document.getElementById('loco-edit-traction').onchange = function () {
+        const isElec = this.value === 'electric';
+        document.getElementById('loco-edit-battery-group').style.display = isElec ? '' : 'none';
+        document.getElementById('loco-edit-fuel-group').style.display = isElec ? 'none' : '';
+    };
+
+    document.getElementById('loco-edit-modal').style.display = 'flex';
+}
+
+async function saveLocoEdit(e) {
+    e.preventDefault();
+    const locoId = document.getElementById('loco-edit-id').value;
+    const traction = document.getElementById('loco-edit-traction').value;
+    const data = {
+        id: locoId,
+        traction_type: traction,
+        Q: parseInt(document.getElementById('loco-edit-q').value) || 50,
+        max_speed: parseInt(document.getElementById('loco-edit-speed').value) || 800,
+        initial_node: document.getElementById('loco-edit-initial-node').value,
+        is_powered_on: document.getElementById('loco-edit-powered').checked,
+        is_schedulable: document.getElementById('loco-edit-schedulable').checked
+    };
+    if (traction === 'electric') {
+        data.battery = parseInt(document.getElementById('loco-edit-battery').value) || 0;
+    } else {
+        data.fuel_tank = parseInt(document.getElementById('loco-edit-fuel').value) || 0;
+    }
+
+    try {
+        const resp = await fetch('/api/locomotives/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            document.getElementById('loco-edit-modal').style.display = 'none';
+            loadLocomotives();
+            alert('机车属性更新成功');
+        } else {
+            alert('更新失败: ' + (result.error || '未知错误'));
+        }
+    } catch (ex) {
+        alert('更新失败: ' + ex.message);
+    }
+}
+
+function setupLocoEditModal() {
+    const form = document.getElementById('loco-edit-form');
+    if (form) form.addEventListener('submit', saveLocoEdit);
+    const cancelBtn = document.getElementById('btn-cancel-edit-loco');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+        document.getElementById('loco-edit-modal').style.display = 'none';
+    });
+    const modal = document.getElementById('loco-edit-modal');
+    if (modal) modal.addEventListener('click', function (e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+}
+
+// ==================== 初始化更新 ====================
+(function () {
+    const origInit = document.addEventListener('DOMContentLoaded', () => { });
+    window.addEventListener('load', () => {
+        initComparisonTab();
+        setupLocoEditModal();
+        // 绑定日志按钮
+        const btnRefresh = document.getElementById('btn-refresh-logs');
+        const btnClear = document.getElementById('btn-clear-logs');
+        if (btnRefresh) btnRefresh.addEventListener('click', loadLogs);
+        if (btnClear) btnClear.addEventListener('click', clearAllLogs);
+    });
+})();

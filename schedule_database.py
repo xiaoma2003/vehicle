@@ -553,6 +553,37 @@ class ScheduleDatabase:
         finally:
             conn.close()
 
+    def delete_log(self, log_id: int) -> bool:
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM system_logs WHERE id = ?", (log_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def delete_logs_batch(self, log_ids: List[int]) -> int:
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(log_ids))
+            cursor.execute(f"DELETE FROM system_logs WHERE id IN ({placeholders})", log_ids)
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def clear_all_logs(self) -> int:
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM system_logs")
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
     def get_all_batch_ids(self, limit: int = 100) -> List[str]:
         conn = self._get_conn()
         try:
