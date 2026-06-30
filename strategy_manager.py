@@ -47,7 +47,7 @@ class StrategyManager:
 
         result = scheduler.solve()
         end_time = time.time()
-        result["solve_time"] = round(end_time - start_time, 3)
+        result["solve_time"] = round(end_time - start_time, 4)
         result["strategy_name"] = strategy_name
         result["strategy_display_name"] = self.strategies[strategy_name]["name"]
 

@@ -477,7 +477,7 @@ function renderComparisonResult(comparison) {
                 ${isFastest && !isBest ? '<span class="best-marker" style="background:#ff9800;">最快</span>' : ''}
             </td>
             <td>${s.makespan || '-'}</td>
-            <td>${s.solve_time || '-'}s</td>
+            <td>${s.solve_time !== undefined && s.solve_time !== null ? s.solve_time + 's' : '-'}</td>
             <td>${s.num_tasks || 0}</td>
             <td>${s.solve_status || '-'}</td>
         </tr>`;
