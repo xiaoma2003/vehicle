@@ -1088,6 +1088,7 @@ async function mapComputeSchedule() {
             currentScheduleResult = result.data;
             isScheduleComputed = true;
             scheduleCompleted = false;
+            isScheduleRequesting = false;
 
             const batchEl = document.getElementById('currentBatch');
             if (batchEl) batchEl.textContent = `批次: ${result.data.batch_id || '-'}`;
@@ -1096,15 +1097,15 @@ async function mapComputeSchedule() {
             updateMapButtons(false, false);
             console.log('[mapComputeSchedule] done, makespan:', result.data.makespan);
         } else {
+            isScheduleRequesting = false;
             alert('运算失败: ' + (result.error || '未知错误'));
             updateMapButtons(false, false);
         }
-        isScheduleRequesting = false;
     } catch (e) {
         console.error('mapComputeSchedule error:', e);
         alert('执行运算出错: ' + e.message);
-        updateMapButtons(false, false);
         isScheduleRequesting = false;
+        updateMapButtons(false, false);
     }
 }
 
@@ -1175,6 +1176,7 @@ function mapResumeSchedule() {
 
 function mapStopSchedule() {
     if (dynamicMap) {
+        dynamicMap.setProgressCallback(null);  // 先清除回调，防止stopSchedule触发loadLogs
         dynamicMap.stopSchedule();
         isScheduleRunning = false;
         scheduleCompleted = true;
