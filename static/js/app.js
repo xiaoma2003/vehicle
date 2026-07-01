@@ -20,6 +20,7 @@ let isScheduleRunning = false;
 let scheduleCompleted = false;
 let isScheduleRequesting = false; // 防止重复请求
 let isScheduleComputed = false; // 是否已完成算法运算
+let isSchedulePlaying = false; // 防止重复播放
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -1108,6 +1109,10 @@ async function mapComputeSchedule() {
 }
 
 function mapPlaySchedule() {
+    if (isSchedulePlaying) {
+        console.log('[mapPlaySchedule] already playing, skip');
+        return;
+    }
     if (!currentScheduleResult || !currentScheduleResult.assignments || currentScheduleResult.assignments.length === 0) {
         alert('请先点击"开始运算"获取调度结果');
         return;
@@ -1117,12 +1122,14 @@ function mapPlaySchedule() {
         return;
     }
 
+    isSchedulePlaying = true;
     console.log('[mapPlaySchedule] starting animation');
 
     dynamicMap.setProgressCallback((progress) => {
         if (progress >= 100) {
             scheduleCompleted = true;
             isScheduleRunning = false;
+            isSchedulePlaying = false;
             updateMapButtons(false, false);
             loadLogs();
         }
@@ -1171,6 +1178,7 @@ function mapStopSchedule() {
         dynamicMap.stopSchedule();
         isScheduleRunning = false;
         scheduleCompleted = true;
+        isSchedulePlaying = false;
         updateMapButtons(false, false);
         loadLogs();
     }

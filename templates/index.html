@@ -46,11 +46,11 @@
                     <option value="genetic">遗传算法</option>
                     <option value="simulated_annealing">模拟退火</option>
                 </select>
-                <button id="mapComputeBtn" class="btn btn-primary" onclick="mapComputeSchedule()">开始运算</button>
-                <button id="mapRunBtn" class="btn btn-success" disabled onclick="mapPlaySchedule()">执行调度</button>
-                <button id="mapPauseBtn" class="btn btn-warning" disabled onclick="mapPauseSchedule()">暂停</button>
-                <button id="mapResumeBtn" class="btn btn-success" disabled onclick="mapResumeSchedule()">继续</button>
-                <button id="mapStopBtn" class="btn btn-danger" disabled onclick="mapStopSchedule()">停止</button>
+                <button id="mapComputeBtn" class="btn btn-primary">开始运算</button>
+                <button id="mapRunBtn" class="btn btn-success" disabled>执行调度</button>
+                <button id="mapPauseBtn" class="btn btn-warning" disabled>暂停</button>
+                <button id="mapResumeBtn" class="btn btn-success" disabled>继续</button>
+                <button id="mapStopBtn" class="btn btn-danger" disabled>停止</button>
                 <select id="mapSpeedSelect" class="form-select" style="width:auto;" onchange="changeSpeed()">
                     <option value="0.5">0.5x</option>
                     <option value="1" selected>1x</option>
@@ -245,7 +245,8 @@
     <script>
         // 验证关键函数是否可访问
         window.addEventListener('load', function() {
-            console.log('Page loaded. mapRunSchedule exists:', typeof mapRunSchedule);
+            console.log('Page loaded. mapComputeSchedule exists:', typeof mapComputeSchedule);
+            console.log('mapPlaySchedule exists:', typeof mapPlaySchedule);
             console.log('dynamicMap exists:', typeof dynamicMap !== 'undefined' && dynamicMap !== null);
             const btn = document.getElementById('mapRunBtn');
             console.log('mapRunBtn:', btn, 'disabled:', btn ? btn.disabled : 'N/A');
