@@ -9,5 +9,6 @@
   "unloading_time": 8,
   "battery_low_threshold": 100,
   "fuel_low_threshold": 50,
-  "energy_consumption_rate": 0.5
+  "energy_consumption_rate": 0.5,
+  "solve_time_limit": 120
 }

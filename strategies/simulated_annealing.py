@@ -4,6 +4,7 @@
 """
 import random
 import math
+import time
 from typing import Dict, List, Any, Tuple
 
 
@@ -201,10 +202,12 @@ class SimulatedAnnealingScheduler:
                 "makespan": 0,
                 "assignments": [],
                 "algorithm": "simulated_annealing",
+                "solve_time": 0,
                 "iterations": 0,
                 "final_temp": initial_temp
             }
 
+        start_time = time.time()
         current_solution = self._create_initial_solution()
         current_assignments, current_makespan = self._decode_solution(current_solution)
 
@@ -242,6 +245,7 @@ class SimulatedAnnealingScheduler:
             "num_tasks": len(best_assignments),
             "num_locomotives": len(self.schedulable_locomotives) + len(self.assigned_tasks),
             "algorithm": "simulated_annealing",
+            "solve_time": round(time.time() - start_time, 2),
             "initial_temp": initial_temp,
             "final_temp": temp,
             "cooling_rate": cooling_rate,

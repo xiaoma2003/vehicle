@@ -344,7 +344,7 @@ class CPSATScheduler:
         model.Minimize(makespan)
 
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 300.0
+        solver.parameters.max_time_in_seconds = self.hyper_params.get("solve_time_limit", 300.0)
         solver.parameters.num_search_workers = 8
 
         status = solver.Solve(model)
@@ -394,7 +394,12 @@ class CPSATScheduler:
                                max((info["unloading_end"] for info in assigned_tasks.values()), default=0)),
                 "assignments": assignments,
                 "num_tasks": len(assignments),
-                "num_locomotives": len(schedulable_locomotives) + len(assigned_tasks)
+                "num_locomotives": len(schedulable_locomotives) + len(assigned_tasks),
+                "solve_time": round(solver.WallTime(), 2),
+                "config": {
+                    "solve_time_limit": self.hyper_params.get("solve_time_limit", 300),
+                    "num_search_workers": 8
+                }
             }
         else:
             return {

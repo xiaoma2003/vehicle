@@ -403,7 +403,16 @@ async function runSchedule() {
 
 function renderScheduleResult(result) {
     const resultDiv = document.getElementById('scheduleResult');
-    if (!resultDiv) return;
+    if (!resultDiv) {
+        console.error('[renderScheduleResult] scheduleResult div not found');
+        return;
+    }
+
+    // 确保dashboard tab是激活的
+    const dashboardTab = document.getElementById('tab-dashboard');
+    if (dashboardTab && !dashboardTab.classList.contains('active')) {
+        dashboardTab.classList.add('active');
+    }
 
     // 显示结果面板
     resultDiv.style.display = 'block';
@@ -432,47 +441,61 @@ function renderScheduleResult(result) {
     `;
 
     if (assignments.length > 0) {
-        const makespan = result.makespan || 100;
-        const locoAssignments = {};
-        assignments.forEach(a => {
-            if (!locoAssignments[a.locomotive_id]) {
-                locoAssignments[a.locomotive_id] = [];
-            }
-            locoAssignments[a.locomotive_id].push(a);
-        });
-
-        html += '<div class="timeline">';
-        Object.entries(locoAssignments).forEach(([locoId, tasks]) => {
-            html += `
-                <div class="timeline-loco">
-                    <div class="timeline-loco-name">${locoId}</div>
-                    <div class="timeline-bar">
-            `;
-            const colors = ['#667eea', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4'];
-            tasks.forEach((task, idx) => {
-                const left = (task.start_time / makespan) * 100;
-                const width = ((task.unloading_end - task.start_time) / makespan) * 100;
-                const color = colors[idx % colors.length];
-                html += `
-                    <div class="timeline-task" style="left:${left}%;width:${width}%;background:${color};"
-                         title="${task.task_id}: ${task.start_time}-${task.unloading_end}">
-                        ${task.task_id}
-                    </div>
-                `;
+        try {
+            const makespan = result.makespan || 100;
+            const locoAssignments = {};
+            assignments.forEach(a => {
+                const lid = a.locomotive_id || '未知';
+                if (!locoAssignments[lid]) {
+                    locoAssignments[lid] = [];
+                }
+                locoAssignments[lid].push(a);
             });
-            html += '</div></div>';
-        });
-        html += '</div>';
+
+            html += '<div class="timeline">';
+            Object.entries(locoAssignments).forEach(([locoId, tasks]) => {
+                html += `
+                    <div class="timeline-loco">
+                        <div class="timeline-loco-name">${locoId}</div>
+                        <div class="timeline-bar">
+                `;
+                const colors = ['#667eea', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4'];
+                tasks.forEach((task, idx) => {
+                    const st = task.start_time || 0;
+                    const ue = task.unloading_end || (st + 1);
+                    const left = Math.max(0, (st / makespan) * 100);
+                    const width = Math.max(1, ((ue - st) / makespan) * 100);
+                    const color = colors[idx % colors.length];
+                    html += `
+                        <div class="timeline-task" style="left:${left}%;width:${width}%;background:${color};"
+                             title="${task.task_id || '-'}: ${st}-${ue}">
+                            ${task.task_id || '-'}
+                        </div>
+                    `;
+                });
+                html += '</div></div>';
+            });
+            html += '</div>';
+        } catch (e) {
+            console.error('[renderScheduleResult] timeline error:', e);
+            html += '<p style="color:red;">时间线渲染失败: ' + e.message + '</p>';
+        }
     }
 
     html += '<h4 style="margin-top:20px;margin-bottom:10px;">任务分配详情</h4>';
     html += '<table class="comparison-table"><tr><th>任务ID</th><th>机车</th><th>开始</th><th>装货结束</th><th>运输结束</th><th>卸货结束</th></tr>';
-    assignments.forEach(a => {
-        html += `<tr><td>${a.task_id}</td><td>${a.locomotive_id}</td><td>${a.start_time}</td><td>${a.loading_end}</td><td>${a.transport_end}</td><td>${a.unloading_end}</td></tr>`;
-    });
+    try {
+        assignments.forEach(a => {
+            html += `<tr><td>${a.task_id || '-'}</td><td>${a.locomotive_id || '-'}</td><td>${a.start_time !== undefined ? a.start_time : '-'}</td><td>${a.loading_end !== undefined ? a.loading_end : '-'}</td><td>${a.transport_end !== undefined ? a.transport_end : '-'}</td><td>${a.unloading_end !== undefined ? a.unloading_end : '-'}</td></tr>`;
+        });
+    } catch (e) {
+        console.error('[renderScheduleResult] table error:', e);
+        html += `<tr><td colspan="6" style="color:red;">表格渲染失败: ${e.message}</td></tr>`;
+    }
     html += '</table>';
 
     resultDiv.innerHTML = html;
+    console.log('[renderScheduleResult] rendered', assignments.length, 'tasks');
 }
 
 function pauseSchedule() {
@@ -1093,12 +1116,23 @@ async function mapComputeSchedule() {
             const batchEl = document.getElementById('currentBatch');
             if (batchEl) batchEl.textContent = `批次: ${result.data.batch_id || '-'}`;
 
-            renderScheduleResult(result.data);
+            try {
+                renderScheduleResult(result.data);
+                console.log('[mapComputeSchedule] renderScheduleResult done');
+            } catch (e) {
+                console.error('[mapComputeSchedule] renderScheduleResult error:', e);
+                const resultDiv = document.getElementById('scheduleResult');
+                if (resultDiv) {
+                    resultDiv.innerHTML = `<div class="alert alert-error">渲染结果失败: ${e.message}</div>`;
+                }
+            }
             updateMapButtons(false, false);
-            console.log('[mapComputeSchedule] done, makespan:', result.data.makespan);
+            console.log('[mapComputeSchedule] done, makespan:', result.data.makespan, 'tasks:', result.data.num_tasks);
         } else {
             isScheduleRequesting = false;
-            alert('运算失败: ' + (result.error || '未知错误'));
+            const errMsg = result.error || '未知错误';
+            console.error('[mapComputeSchedule] API failed:', errMsg);
+            alert('运算失败: ' + errMsg);
             updateMapButtons(false, false);
         }
     } catch (e) {
