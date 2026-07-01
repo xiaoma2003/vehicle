@@ -61,6 +61,54 @@
       "task_phase": "transporting"
     },
     {
+      "id": "L006",
+      "traction_type": "electric",
+      "Q": 50,
+      "max_speed": 800,
+      "initial_node": "S2",
+      "battery": 1000,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L007",
+      "traction_type": "diesel",
+      "Q": 65,
+      "max_speed": 750,
+      "initial_node": "M1",
+      "fuel_tank": 600,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L008",
+      "traction_type": "electric",
+      "Q": 55,
+      "max_speed": 820,
+      "initial_node": "M2",
+      "battery": 900,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
+      "id": "L009",
+      "traction_type": "diesel",
+      "Q": 40,
+      "max_speed": 700,
+      "initial_node": "C1",
+      "fuel_tank": 400,
+      "is_powered_on": true,
+      "is_schedulable": true,
+      "current_task": null,
+      "task_phase": null
+    },
+    {
       "id": "TEST01",
       "traction_type": "electric",
       "Q": 30,

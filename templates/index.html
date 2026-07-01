@@ -3,223 +3,234 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>车辆调度AI算法评测系统</title>
+    <title>车辆调度系统</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <header class="app-header">
-            <div class="logo">
-                <h1>🚂 车辆调度AI算法评测系统</h1>
-            </div>
-            <div class="header-actions">
-                <span id="currentBatch" class="batch-info">批次: 未开始</span>
-                <button onclick="showStatistics()" class="btn btn-secondary">📊 统计</button>
+    <div class="container">
+        <header>
+            <h1>车辆调度系统</h1>
+            <div class="header-controls">
+                <span id="currentBatch" style="margin-right:12px;color:#666;"></span>
+                <span id="system-status" class="status-indicator status-online">系统就绪</span>
+                <button id="btn-refresh" class="btn btn-secondary">刷新数据</button>
             </div>
         </header>
 
-        <div class="main-content">
-            <aside class="sidebar">
-                <div class="tabs">
-                    <button class="tab-btn active" data-tab="map">🗺️ 地图</button>
-                    <button class="tab-btn" data-tab="tasks">📋 任务</button>
-                    <button class="tab-btn" data-tab="locomotives">🚃 机车</button>
-                    <button class="tab-btn" data-tab="scheduling">⚙️ 调度</button>
-                    <button class="tab-btn" data-tab="comparison">📈 对比</button>
-                    <button class="tab-btn" data-tab="history">📚 历史</button>
-                    <button class="tab-btn" data-tab="logs">📝 日志</button>
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="dashboard">仪表盘</button>
+            <button class="tab-btn" data-tab="scheduling">超参数</button>
+            <button class="tab-btn" data-tab="tasks">任务管理</button>
+            <button class="tab-btn" data-tab="locomotives">机车管理</button>
+            <button class="tab-btn" data-tab="history">历史记录</button>
+            <button class="tab-btn" data-tab="comparison">多策略对比</button>
+            <button class="tab-btn" data-tab="logs">系统日志</button>
+        </nav>
+
+        <!-- ==================== 仪表盘 ==================== -->
+        <div class="tab-content active" id="tab-dashboard">
+            <div id="map-container" class="map-container" style="position:relative;">
+                <div style="display:flex;gap:8px;padding:8px 12px;background:#f8fafc;border-bottom:1px solid #e0e0e0;border-radius:6px 6px 0 0;flex-wrap:wrap;align-items:center;">
+                    <button onclick="addNodeModal()" class="btn btn-primary btn-sm">+ 添加节点</button>
+                    <button onclick="deleteNodeModal()" class="btn btn-danger btn-sm">- 删除节点</button>
+                    <span style="flex:1;"></span>
+                    <span id="mouse-coords" class="mouse-coords">坐标: -</span>
                 </div>
-            </aside>
+                <canvas id="mapCanvas" class="map-canvas" width="800" height="550"></canvas>
+            </div>
+            <div id="map-toolbar" class="map-toolbar">
+                <select id="mapStrategySelect" class="form-select" style="width:auto;display:inline-block;">
+                    <option value="cpsat">CP-SAT 基准策略</option>
+                    <option value="greedy">贪心算法</option>
+                    <option value="genetic">遗传算法</option>
+                    <option value="simulated_annealing">模拟退火</option>
+                </select>
+                <button id="mapRunBtn" class="btn btn-primary" onclick="mapRunSchedule()">执行调度</button>
+                <button id="mapPauseBtn" class="btn btn-warning" disabled onclick="mapPauseSchedule()">暂停</button>
+                <button id="mapResumeBtn" class="btn btn-success" disabled onclick="mapResumeSchedule()">继续</button>
+                <button id="mapStopBtn" class="btn btn-danger" disabled onclick="mapStopSchedule()">停止</button>
+                <span id="mouse-coords" class="mouse-coords">坐标: -</span>
+            </div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <select id="directionSelect" class="form-select" style="width:auto;" onchange="checkDirectionLock()">
+                    <option value="up">上行</option>
+                    <option value="down">下行</option>
+                </select>
+                <span id="directionStatus" class="direction-status">方向状态: -</span>
+            </div>
+            <div id="vehicleStatusList" class="vehicle-status-panel" style="margin-top:16px;"></div>
+            <div id="scheduleResult" class="result-panel" style="display:none;margin-top:16px;"></div>
+        </div>
 
-            <main class="content-area">
-                <div id="tab-map" class="tab-content active">
-                    <div class="map-container">
-                        <div class="map-toolbar">
-                            <h3>动态地图展示</h3>
-                            <div class="map-controls">
-                                <button onclick="addNodeModal()" class="btn btn-primary">+ 添加节点</button>
-                                <button onclick="deleteNodeModal()" class="btn btn-danger">- 删除节点</button>
-                                <button onclick="addEdgeModal()" class="btn btn-secondary">+ 添加边</button>
-                                <button onclick="loadMapConfig()" class="btn btn-info">🔄 刷新</button>
-                                <select id="directionSelect" onchange="checkDirectionLock()">
-                                    <option value="up">上行方向</option>
-                                    <option value="down">下行方向</option>
-                                </select>
-                                <span id="directionStatus" class="direction-status">方向状态: --</span>
-                            </div>
-                        </div>
-                        <canvas id="mapCanvas" class="map-canvas"></canvas>
-                        <div class="map-legend">
-                            <span class="legend-item"><span class="legend-dot station"></span>车站</span>
-                            <span class="legend-item"><span class="legend-dot fuel"></span>加油站</span>
-                            <span class="legend-item"><span class="legend-dot charge"></span>充电站</span>
-                            <span class="legend-item"><span class="legend-dot material"></span>物料站</span>
-                            <span class="legend-item"><span class="legend-dot switch"></span>道岔</span>
-                            <span class="legend-item"><span class="legend-line up"></span>上行</span>
-                            <span class="legend-item"><span class="legend-line down"></span>下行</span>
-                        </div>
-                    </div>
-                    <div class="vehicle-status-panel">
-                        <h3>🚃 车辆实时状态</h3>
-                        <div id="vehicleStatusList" class="vehicle-list">
-                            <p class="text-muted">暂无车辆数据</p>
-                        </div>
-                    </div>
+        <!-- ==================== 超参数 ==================== -->
+        <div class="tab-content" id="tab-scheduling">
+            <div class="section">
+                <h3>超参数配置</h3>
+                <form id="hyperParamsForm" class="hyper-params-form"></form>
+                <button class="btn btn-primary" onclick="saveHyperParams()" style="margin-top:12px;">保存超参数</button>
+            </div>
+        </div>
+
+        <!-- ==================== 任务管理 ==================== -->
+        <div class="tab-content" id="tab-tasks">
+            <div class="section">
+                <h3>任务列表</h3>
+                <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                    <select id="taskTypeFilter" class="form-select" style="width:auto;" onchange="loadTasks()">
+                        <option value="">全部类型</option>
+                        <option value="normal">普通</option>
+                        <option value="temporary">临时</option>
+                        <option value="emergency">紧急</option>
+                    </select>
+                    <select id="taskStatusFilter" class="form-select" style="width:auto;" onchange="loadTasks()">
+                        <option value="">全部状态</option>
+                        <option value="pending">待执行</option>
+                        <option value="running">执行中</option>
+                        <option value="paused">已暂停</option>
+                        <option value="completed">已完成</option>
+                    </select>
+                    <button id="btn-add-task" class="btn btn-primary" onclick="addTaskModal()">添加任务</button>
                 </div>
+                <div id="tasksList"></div>
+                <table id="tasks-table" class="data-table" style="display:none;">
+                    <thead><tr><th>任务ID</th><th>类型</th><th>起点</th><th>终点</th><th>重量</th><th>优先级</th><th>状态</th><th>依赖</th><th>绑定机车</th><th>操作</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
 
-                <div id="tab-tasks" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>任务管理</h3>
-                            <div>
-                                <button onclick="addTaskModal()" class="btn btn-primary">+ 添加任务</button>
-                                <button onclick="triggerEmergencyModal()" class="btn btn-danger">🚨 紧急任务</button>
-                                <button onclick="boostPriorityModal()" class="btn btn-warning">⬆ 提升优先级</button>
-                            </div>
-                        </div>
-                        <div class="task-filters">
-                            <select id="taskTypeFilter" onchange="loadTasks()">
-                                <option value="">全部类型</option>
-                                <option value="normal">普通任务</option>
-                                <option value="temporary">临时任务</option>
-                                <option value="emergency">紧急任务</option>
-                            </select>
-                            <select id="taskStatusFilter" onchange="loadTasks()">
-                                <option value="">全部状态</option>
-                                <option value="pending">待执行</option>
-                                <option value="running">执行中</option>
-                                <option value="paused">已暂停</option>
-                                <option value="completed">已完成</option>
-                            </select>
-                        </div>
-                        <div id="tasksList" class="data-list">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                    </div>
+        <!-- ==================== 机车管理 ==================== -->
+        <div class="tab-content" id="tab-locomotives">
+            <div class="section">
+                <h3>机车列表</h3>
+                <div style="display:flex;gap:10px;margin-bottom:12px;">
+                    <select id="locoTypeFilter" class="form-select" style="width:auto;" onchange="loadLocomotives()">
+                        <option value="">全部类型</option>
+                        <option value="electric">电动机车</option>
+                        <option value="diesel">柴油机车</option>
+                    </select>
+                    <button id="btn-add-locomotive" class="btn btn-primary" onclick="addLocomotiveModal('electric')">添加电动机车</button>
+                    <button class="btn btn-secondary" onclick="addLocomotiveModal('diesel')">添加柴油机车</button>
                 </div>
+                <div id="locomotivesList" style="display:none;"></div>
+                <div id="locomotive-list" class="loco-grid"></div>
+            </div>
+        </div>
 
-                <div id="tab-locomotives" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>机车管理</h3>
-                            <div>
-                                <button onclick="addLocomotiveModal('electric')" class="btn btn-success">+ 添加电车</button>
-                                <button onclick="addLocomotiveModal('diesel')" class="btn btn-warning">+ 添加油车</button>
-                            </div>
-                        </div>
-                        <div class="loco-filters">
-                            <select id="locoTypeFilter" onchange="loadLocomotives()">
-                                <option value="">全部类型</option>
-                                <option value="electric">电动机车</option>
-                                <option value="diesel">柴油机车</option>
-                            </select>
-                        </div>
-                        <div id="locomotivesList" class="data-list">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                    </div>
+        <!-- ==================== 历史记录 ==================== -->
+        <div class="tab-content" id="tab-history">
+            <div class="section">
+                <h3>历史调度记录</h3>
+                <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                    <select id="historyBatchSelect" class="form-select" style="width:auto;" onchange="loadBatchHistory()">
+                        <option value="">选择批次</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="filterHistory()">筛选</button>
                 </div>
+                <div id="historyFilters" style="display:none;"></div>
+                <div id="historyList"></div>
+                <div id="historyPagination" class="pagination"></div>
+            </div>
+        </div>
 
-                <div id="tab-scheduling" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>调度控制</h3>
+        <!-- ==================== 多策略对比 ==================== -->
+        <div class="tab-content" id="tab-comparison">
+            <div class="section">
+                <h3>多策略对比分析</h3>
+                <div class="comparison-layout">
+                    <div class="strategy-selection">
+                        <h4>选择对比策略</h4>
+                        <p class="hint">基准策略默认选中，请至少勾选1个候选策略</p>
+                        <div id="strategy-checkboxes" class="strategy-checkboxes"></div>
+                        <div class="strategy-actions">
+                            <button id="btn-run-comparison" class="btn btn-primary btn-lg">一键运行对比</button>
+                            <button id="btn-export-comparison" class="btn btn-success" disabled>导出报告</button>
                         </div>
-                        <div class="scheduling-controls">
-                            <div class="control-group">
-                                <label>选择策略:</label>
-                                <select id="strategySelect">
-                                    <option value="cpsat">CP-SAT 基准策略</option>
-                                    <option value="greedy">贪心算法</option>
-                                    <option value="genetic">遗传算法</option>
-                                    <option value="simulated_annealing">模拟退火</option>
-                                </select>
-                            </div>
-                            <div class="control-group">
-                                <label>
-                                    <input type="checkbox" id="hotStartCheck"> 热启动（跳过已绑定任务的车辆）
-                                </label>
-                            </div>
-                            <div class="control-group">
-                                <button onclick="runSchedule()" class="btn btn-primary btn-large">▶ 执行调度</button>
-                                <button onclick="pauseSchedule()" class="btn btn-warning">⏸ 暂停</button>
-                                <button onclick="resumeSchedule()" class="btn btn-success">▶ 继续</button>
-                            </div>
-                        </div>
-                        <div id="scheduleResult" class="schedule-result">
-                            <p class="text-muted">点击执行调度开始</p>
+                        <div id="comparison-progress" class="comparison-progress" style="display:none;">
+                            <div class="progress-bar"><div class="progress-fill" id="comparison-progress-fill"></div></div>
+                            <span id="comparison-progress-text">运行中...</span>
                         </div>
                     </div>
-
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>超参数配置</h3>
-                            <button onclick="saveHyperParams()" class="btn btn-primary">💾 保存</button>
+                    <div id="comparisonResult" style="display:none;"></div>
+                    <div id="comparison-results" class="comparison-results" style="display:none;">
+                        <h4>对比结果概览</h4>
+                        <div class="table-scroll">
+                            <table id="comparison-table" class="data-table">
+                                <thead><tr><th>策略</th><th>Makespan</th><th>求解时间(s)</th><th>任务数</th><th>状态</th><th>能耗</th><th>动态适应性</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
-                        <div id="hyperParamsForm" class="form-grid">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="tab-comparison" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>多策略对比</h3>
-                            <button onclick="runComparison()" class="btn btn-primary">开始对比</button>
-                        </div>
-                        <div class="comparison-options">
-                            <label><input type="checkbox" class="compare-strategy" value="cpsat" checked> CP-SAT基准</label>
-                            <label><input type="checkbox" class="compare-strategy" value="greedy" checked> 贪心算法</label>
-                            <label><input type="checkbox" class="compare-strategy" value="genetic" checked> 遗传算法</label>
-                            <label><input type="checkbox" class="compare-strategy" value="simulated_annealing" checked> 模拟退火</label>
-                        </div>
-                        <div id="comparisonResult" class="comparison-result">
-                            <p class="text-muted">选择策略后点击开始对比</p>
+                        <div class="charts-grid">
+                            <div class="chart-card"><h4>求解速度对比</h4><canvas id="chart-solve-time"></canvas></div>
+                            <div class="chart-card"><h4>解质量对比 (Makespan)</h4><canvas id="chart-makespan"></canvas></div>
+                            <div class="chart-card"><h4>能耗优化对比</h4><canvas id="chart-energy"></canvas></div>
+                            <div class="chart-card"><h4>动态适应性对比</h4><canvas id="chart-adaptability"></canvas></div>
+                            <div class="chart-card chart-radar"><h4>综合性能雷达图</h4><canvas id="chart-radar"></canvas></div>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
 
-                <div id="tab-history" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>历史回放</h3>
-                            <select id="historyBatchSelect" onchange="loadBatchHistory()">
-                                <option value="">选择批次</option>
-                            </select>
-                        </div>
-                        <div class="history-filters">
-                            <input type="text" id="historySearch" placeholder="搜索批次ID..." onkeyup="filterHistory()">
-                        </div>
-                        <div id="historyList" class="data-list">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                        <div id="historyPagination" class="pagination"></div>
-                    </div>
+        <!-- ==================== 系统日志 ==================== -->
+        <div class="tab-content" id="tab-logs">
+            <div class="section">
+                <h3>系统日志</h3>
+                <div class="log-controls">
+                    <select id="logLevelFilter" class="form-select" style="width:auto;" onchange="loadLogs()">
+                        <option value="">全部级别</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
+                    <button id="btn-refresh-logs" class="btn btn-secondary">刷新日志</button>
+                    <button id="btn-clear-logs" class="btn btn-danger">清空日志</button>
                 </div>
-
-                <div id="tab-logs" class="tab-content">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h3>系统日志</h3>
-                            <select id="logLevelFilter" onchange="loadLogs()">
-                                <option value="">全部级别</option>
-                                <option value="INFO">信息</option>
-                                <option value="WARN">警告</option>
-                                <option value="ERROR">错误</option>
-                            </select>
-                        </div>
-                        <div id="logsList" class="logs-list">
-                            <p class="text-muted">加载中...</p>
-                        </div>
-                        <div id="logsPagination" class="pagination"></div>
-                    </div>
+                <div class="table-scroll">
+                    <table id="logs-table" class="data-table">
+                        <thead><tr><th>ID</th><th>时间</th><th>级别</th><th>模块</th><th>消息</th><th>操作</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
-            </main>
+                <div id="logsList" style="display:none;"></div>
+                <div id="logsPagination" class="pagination" style="margin-top:10px;"></div>
+            </div>
         </div>
     </div>
 
+    <!-- ==================== 隐藏元素：兼容旧JS ==================== -->
     <div id="modalContainer"></div>
+    <select id="strategySelect" style="display:none;"><option value="cpsat">CP-SAT</option></select>
+    <input type="checkbox" id="hotStartCheck" style="display:none;">
+
+    <!-- ==================== 机车编辑弹窗 ==================== -->
+    <div id="loco-edit-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h3>编辑机车属性</h3>
+            <form id="loco-edit-form">
+                <input type="hidden" id="loco-edit-id">
+                <div class="form-group">
+                    <label>牵引类型</label>
+                    <select id="loco-edit-traction" class="form-select">
+                        <option value="electric">电动</option>
+                        <option value="diesel">柴油</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>载重 Q (吨)</label><input type="number" id="loco-edit-q" class="form-input" min="1"></div>
+                <div class="form-group"><label>最大速度 (m/min)</label><input type="number" id="loco-edit-speed" class="form-input" min="100"></div>
+                <div class="form-group"><label>初始节点</label><input type="text" id="loco-edit-initial-node" class="form-input"></div>
+                <div class="form-group" id="loco-edit-battery-group"><label>电池容量</label><input type="number" id="loco-edit-battery" class="form-input" min="0"></div>
+                <div class="form-group" id="loco-edit-fuel-group"><label>油箱容量</label><input type="number" id="loco-edit-fuel" class="form-input" min="0"></div>
+                <div class="form-group"><label><input type="checkbox" id="loco-edit-powered"> 已启动</label></div>
+                <div class="form-group"><label><input type="checkbox" id="loco-edit-schedulable"> 可调度</label></div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">保存</button>
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-edit-loco">取消</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <script src="/static/js/map.js"></script>
     <script src="/static/js/app.js"></script>
