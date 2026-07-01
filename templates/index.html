@@ -40,13 +40,14 @@
                 <canvas id="mapCanvas" class="map-canvas" width="800" height="550"></canvas>
             </div>
             <div id="map-toolbar" class="map-toolbar">
-                <select id="mapStrategySelect" class="form-select" style="width:auto;display:inline-block;">
+                <select id="mapStrategySelect" class="form-select" style="width:auto;display:inline-block;" onchange="onStrategyChange()">
                     <option value="cpsat">CP-SAT 基准策略</option>
                     <option value="greedy">贪心算法</option>
                     <option value="genetic">遗传算法</option>
                     <option value="simulated_annealing">模拟退火</option>
                 </select>
-                <button id="mapRunBtn" class="btn btn-primary" onclick="mapRunSchedule()">执行调度</button>
+                <button id="mapComputeBtn" class="btn btn-primary" onclick="mapComputeSchedule()">开始运算</button>
+                <button id="mapRunBtn" class="btn btn-success" disabled onclick="mapPlaySchedule()">执行调度</button>
                 <button id="mapPauseBtn" class="btn btn-warning" disabled onclick="mapPauseSchedule()">暂停</button>
                 <button id="mapResumeBtn" class="btn btn-success" disabled onclick="mapResumeSchedule()">继续</button>
                 <button id="mapStopBtn" class="btn btn-danger" disabled onclick="mapStopSchedule()">停止</button>

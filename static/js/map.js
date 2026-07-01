@@ -620,8 +620,8 @@ class DynamicMap {
 
     setSpeed(speed) {
         this.speed = speed;
+        this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
         if (this.isPlaying && !this.isPaused) {
-            this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
             this.playStartTime = Date.now() - (this.currentTime / this.maxTime) * this.animationDuration;
         }
     }
