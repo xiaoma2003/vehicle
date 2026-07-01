@@ -912,7 +912,7 @@ function loadLogsPage(page) {
 }
 
 function renderLogsList(logs) {
-    const list = document.getElementById('logs-table tbody');
+    const list = document.querySelector('#logs-table tbody');
     if (!list) return;
 
     if (logs.length === 0) {
@@ -1036,7 +1036,8 @@ async function mapRunSchedule() {
                     loadLogs();
                 }
             });
-            dynamicMap.playSchedule(result.data.assignments);
+            const speed = parseFloat(document.getElementById('mapSpeedSelect').value) || 1;
+            dynamicMap.playSchedule(result.data.assignments, speed);
             isScheduleRunning = true;
             updateMapButtons(true, false);
             updateVehicleStatusPanel();
@@ -1074,6 +1075,13 @@ function mapStopSchedule() {
         scheduleCompleted = true;
         updateMapButtons(false, false);
         loadLogs();
+    }
+}
+
+function changeSpeed() {
+    const speed = parseFloat(document.getElementById('mapSpeedSelect').value);
+    if (dynamicMap) {
+        dynamicMap.setSpeed(speed);
     }
 }
 
@@ -1414,7 +1422,7 @@ async function saveLocoEdit(e) {
         max_speed: parseInt(document.getElementById('loco-edit-speed').value) || 800,
         initial_node: document.getElementById('loco-edit-initial-node').value,
         is_powered_on: document.getElementById('loco-edit-powered').checked,
-        is_schedulable: document.getElementById('loco-edit-schedulable').checked
+        is_schedulable: document.getElementById('loco-edit-powered').checked ? document.getElementById('loco-edit-schedulable').checked : false
     };
     if (traction === 'electric') {
         data.battery = parseInt(document.getElementById('loco-edit-battery').value) || 0;
@@ -1452,6 +1460,17 @@ function setupLocoEditModal() {
     if (modal) modal.addEventListener('click', function (e) {
         if (e.target === this) this.style.display = 'none';
     });
+
+    // 关机状态联动: 取消开机时自动取消可调度
+    const poweredCb = document.getElementById('loco-edit-powered');
+    const schedulableCb = document.getElementById('loco-edit-schedulable');
+    if (poweredCb && schedulableCb) {
+        poweredCb.addEventListener('change', function () {
+            if (!this.checked) {
+                schedulableCb.checked = false;
+            }
+        });
+    }
 }
 
 // ==================== 初始化更新 ====================
