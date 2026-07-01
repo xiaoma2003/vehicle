@@ -18,6 +18,7 @@ let currentHyperParams = null;
 let currentScheduleResult = null;
 let isScheduleRunning = false;
 let scheduleCompleted = false;
+let isScheduleRequesting = false; // 防止重复请求
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -26,6 +27,18 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAllData();
         loadStrategies();
         loadBatchIds();
+        
+        // 绑定地图执行按钮
+        const runBtn = document.getElementById('mapRunBtn');
+        if (runBtn) {
+            runBtn.addEventListener('click', mapRunSchedule);
+        }
+        const pauseBtn = document.getElementById('mapPauseBtn');
+        if (pauseBtn) pauseBtn.addEventListener('click', mapPauseSchedule);
+        const resumeBtn = document.getElementById('mapResumeBtn');
+        if (resumeBtn) resumeBtn.addEventListener('click', mapResumeSchedule);
+        const stopBtn = document.getElementById('mapStopBtn');
+        if (stopBtn) stopBtn.addEventListener('click', mapStopSchedule);
     } catch (e) {
         console.error('DOMContentLoaded error:', e);
         alert('页面初始化错误: ' + e.message);
@@ -1023,12 +1036,29 @@ function updateMapButtons(running, paused) {
 
 async function mapRunSchedule() {
     try {
+        // 防止重复请求
+        if (isScheduleRequesting) {
+            console.log('[mapRunSchedule] already requesting, skip');
+            return;
+        }
+        isScheduleRequesting = true;
+        console.log('[mapRunSchedule] starting');
+        
         const runBtn = document.getElementById('mapRunBtn');
         if (runBtn && runBtn.disabled) {
             alert('调度进行中或已暂停，请先点击继续或等待完成');
+            isScheduleRequesting = false;
             return;
         }
-        const strategy = document.getElementById('mapStrategySelect').value;
+        const strategyEl = document.getElementById('mapStrategySelect');
+        if (!strategyEl) {
+            console.error('[mapRunSchedule] mapStrategySelect not found');
+            alert('找不到策略选择器');
+            isScheduleRequesting = false;
+            return;
+        }
+        const strategy = strategyEl.value;
+        console.log('[mapRunSchedule] strategy:', strategy);
 
         updateMapButtons(true, false);
 
@@ -1066,14 +1096,17 @@ async function mapRunSchedule() {
                 // 无动画时也刷新日志
                 loadLogs();
             }
+            isScheduleRequesting = false;
         } else {
             alert('调度失败: ' + (result.error || '未知错误'));
             updateMapButtons(false, false);
+            isScheduleRequesting = false;
         }
     } catch (e) {
         console.error('mapRunSchedule error:', e);
         alert('执行调度出错: ' + e.message);
         updateMapButtons(false, false);
+        isScheduleRequesting = false;
     }
 }
 
@@ -1508,12 +1541,5 @@ function setupLocoEditModal() {
         const btnClear = document.getElementById('btn-clear-logs');
         if (btnRefresh) btnRefresh.addEventListener('click', loadLogs);
         if (btnClear) btnClear.addEventListener('click', clearAllLogs);
-        
-        // 绑定地图执行按钮（用addEventListener保证可靠）
-        const runBtn = document.getElementById('mapRunBtn');
-        if (runBtn) {
-            runBtn.addEventListener('click', mapRunSchedule);
-            console.log('mapRunBtn click listener registered');
-        }
     });
 })();
