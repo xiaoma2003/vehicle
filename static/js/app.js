@@ -3,6 +3,14 @@
  */
 
 const API_BASE = '/api';
+
+// 全局错误处理
+window.onerror = function(msg, url, line, col, error) {
+    console.error('Global error:', msg, url, line, col, error);
+    alert('JS错误: ' + msg + ' (行' + line + ')');
+    return false;
+};
+
 let currentMapData = null;
 let currentTasksData = null;
 let currentLocomotivesData = null;
@@ -12,11 +20,16 @@ let isScheduleRunning = false;
 let scheduleCompleted = false;
 
 document.addEventListener('DOMContentLoaded', () => {
-    initTabs();
-    initMap();
-    loadAllData();
-    loadStrategies();
-    loadBatchIds();
+    try {
+        initTabs();
+        initMap();
+        loadAllData();
+        loadStrategies();
+        loadBatchIds();
+    } catch (e) {
+        console.error('DOMContentLoaded error:', e);
+        alert('页面初始化错误: ' + e.message);
+    }
 });
 
 function initTabs() {
@@ -43,6 +56,8 @@ function initTabs() {
 }
 
 async function apiCall(url, method = 'GET', data = null) {
+    const fullUrl = API_BASE + url;
+    console.log('[apiCall]', method, fullUrl, data);
     try {
         const options = {
             method,
@@ -53,8 +68,10 @@ async function apiCall(url, method = 'GET', data = null) {
         if (data) {
             options.body = JSON.stringify(data);
         }
-        const response = await fetch(API_BASE + url, options);
-        return await response.json();
+        const response = await fetch(fullUrl, options);
+        const result = await response.json();
+        console.log('[apiCall] response:', result.success ? 'success' : 'failed');
+        return result;
     } catch (error) {
         console.error('API调用失败:', error);
         return { success: false, error: error.message };
@@ -1005,49 +1022,57 @@ function updateMapButtons(running, paused) {
 }
 
 async function mapRunSchedule() {
-    const runBtn = document.getElementById('mapRunBtn');
-    if (runBtn && runBtn.disabled) {
-        alert('调度进行中或已暂停，请先点击继续或等待完成');
-        return;
-    }
-    const strategy = document.getElementById('mapStrategySelect').value;
-
-    updateMapButtons(true, false);
-
-    const result = await apiCall('/schedule/run', 'POST', {
-        strategy,
-        use_hot_start: false
-    });
-
-    if (result.success && result.data) {
-        currentScheduleResult = result.data;
-        scheduleCompleted = false;
-        document.getElementById('currentBatch').textContent = `批次: ${result.data.batch_id || '-'}`;
-
-        // 在仪表盘显示调度结果
-        renderScheduleResult(result.data);
-
-        if (result.data.assignments && result.data.assignments.length > 0 && dynamicMap) {
-            dynamicMap.setProgressCallback((progress) => {
-                if (progress >= 100) {
-                    scheduleCompleted = true;
-                    updateMapButtons(false, false);
-                    // 调度完成后刷新日志
-                    loadLogs();
-                }
-            });
-            const speed = parseFloat(document.getElementById('mapSpeedSelect').value) || 1;
-            dynamicMap.playSchedule(result.data.assignments, speed);
-            isScheduleRunning = true;
-            updateMapButtons(true, false);
-            updateVehicleStatusPanel();
-        } else {
-            updateMapButtons(false, false);
-            // 无动画时也刷新日志
-            loadLogs();
+    try {
+        const runBtn = document.getElementById('mapRunBtn');
+        if (runBtn && runBtn.disabled) {
+            alert('调度进行中或已暂停，请先点击继续或等待完成');
+            return;
         }
-    } else {
-        alert('调度失败: ' + (result.error || '未知错误'));
+        const strategy = document.getElementById('mapStrategySelect').value;
+
+        updateMapButtons(true, false);
+
+        const result = await apiCall('/schedule/run', 'POST', {
+            strategy,
+            use_hot_start: false
+        });
+
+        if (result.success && result.data) {
+            currentScheduleResult = result.data;
+            scheduleCompleted = false;
+            const batchEl = document.getElementById('currentBatch');
+            if (batchEl) batchEl.textContent = `批次: ${result.data.batch_id || '-'}`;
+
+            // 在仪表盘显示调度结果
+            renderScheduleResult(result.data);
+
+            if (result.data.assignments && result.data.assignments.length > 0 && dynamicMap) {
+                dynamicMap.setProgressCallback((progress) => {
+                    if (progress >= 100) {
+                        scheduleCompleted = true;
+                        updateMapButtons(false, false);
+                        // 调度完成后刷新日志
+                        loadLogs();
+                    }
+                });
+                const speedEl = document.getElementById('mapSpeedSelect');
+                const speed = speedEl ? parseFloat(speedEl.value) || 1 : 1;
+                dynamicMap.playSchedule(result.data.assignments, speed);
+                isScheduleRunning = true;
+                updateMapButtons(true, false);
+                updateVehicleStatusPanel();
+            } else {
+                updateMapButtons(false, false);
+                // 无动画时也刷新日志
+                loadLogs();
+            }
+        } else {
+            alert('调度失败: ' + (result.error || '未知错误'));
+            updateMapButtons(false, false);
+        }
+    } catch (e) {
+        console.error('mapRunSchedule error:', e);
+        alert('执行调度出错: ' + e.message);
         updateMapButtons(false, false);
     }
 }
@@ -1475,7 +1500,6 @@ function setupLocoEditModal() {
 
 // ==================== 初始化更新 ====================
 (function () {
-    const origInit = document.addEventListener('DOMContentLoaded', () => { });
     window.addEventListener('load', () => {
         initComparisonTab();
         setupLocoEditModal();
@@ -1484,5 +1508,12 @@ function setupLocoEditModal() {
         const btnClear = document.getElementById('btn-clear-logs');
         if (btnRefresh) btnRefresh.addEventListener('click', loadLogs);
         if (btnClear) btnClear.addEventListener('click', clearAllLogs);
+        
+        // 绑定地图执行按钮（用addEventListener保证可靠）
+        const runBtn = document.getElementById('mapRunBtn');
+        if (runBtn) {
+            runBtn.addEventListener('click', mapRunSchedule);
+            console.log('mapRunBtn click listener registered');
+        }
     });
 })();
