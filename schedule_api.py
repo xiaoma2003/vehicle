@@ -207,41 +207,6 @@ class ScheduleAPI:
 
         return {"success": True, "data": locomotive, "message": "机车添加成功"}
 
-    def update_locomotive(self, locomotive: Dict[str, Any]) -> Dict[str, Any]:
-        if not self.locomotives_config:
-            return {"success": False, "error": "机车配置未加载"}
-
-        loco_list = self.locomotives_config["locomotives"]
-        loco_id = locomotive.get("id")
-        if not loco_id:
-            return {"success": False, "error": "缺少机车ID"}
-
-        existing = None
-        for i, l in enumerate(loco_list):
-            if l["id"] == loco_id:
-                existing = l
-                break
-
-        if existing is None:
-            return {"success": False, "error": f"机车不存在: {loco_id}"}
-
-        # 更新允许的字段
-        allowed_fields = [
-            "traction_type", "Q", "max_speed", "initial_node",
-            "battery", "fuel_tank", "is_powered_on", "is_schedulable",
-            "current_task", "task_phase"
-        ]
-        for field in allowed_fields:
-            if field in locomotive:
-                existing[field] = locomotive[field]
-
-        self.config_loader._validate_locomotives_config(self.locomotives_config)
-        self.config_loader.save_config(self.locomotives_config, "locomotives_config.json")
-
-        self.db.add_log(None, "INFO", "locomotive", f"更新机车: {loco_id}")
-
-        return {"success": True, "data": existing, "message": "机车更新成功"}
-
     def add_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         if not self.tasks_config:
             self.tasks_config = {"tasks": []}
@@ -288,6 +253,30 @@ class ScheduleAPI:
                       f"添加边: {edge['from']} -> {edge['to']}")
 
         return {"success": True, "data": edge, "message": "边添加成功"}
+
+    def delete_node(self, node_id: str) -> Dict[str, Any]:
+        if not self.map_config:
+            return {"success": False, "error": "地图配置未加载"}
+
+        node_list = self.map_config["nodes"]
+        node = next((n for n in node_list if n["id"] == node_id), None)
+        if not node:
+            return {"success": False, "error": f"节点不存在: {node_id}"}
+
+        # 删除节点
+        self.map_config["nodes"] = [n for n in node_list if n["id"] != node_id]
+        # 删除相关边
+        self.map_config["edges"] = [
+            e for e in self.map_config["edges"]
+            if e["from"] != node_id and e["to"] != node_id
+        ]
+
+        self.config_loader._validate_map_config(self.map_config)
+        self.config_loader.save_config(self.map_config, "map_config.json")
+
+        self.db.add_log(None, "INFO", "map", f"删除节点: {node_id} ({node['type']})")
+
+        return {"success": True, "data": node, "message": f"节点 {node_id} 已删除"}
 
     def boost_task_priority(self, task_id: str, boost_amount: int = 10) -> Dict[str, Any]:
         if not self.tasks_config:
