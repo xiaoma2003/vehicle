@@ -914,27 +914,129 @@ function renderHistoryList(runs) {
     }
 
     list.innerHTML = runs.map(run => `
-        <div class="task-item" onclick="viewRunDetail(${run.id})" style="cursor:pointer;">
-            <div class="task-header">
-                <span class="task-id">${run.batch_id}</span>
-                <span class="task-type ${run.solve_status === 'optimal' ? 'normal' : 'temporary'}">${run.strategy_display_name || run.strategy_name}</span>
+        <div class="history-item" id="history-item-${run.id}">
+            <div class="task-item" onclick="toggleHistoryDetail(${run.id})" style="cursor:pointer;">
+                <div class="task-header">
+                    <span class="task-id">${run.batch_id}</span>
+                    <span class="task-type ${run.solve_status === 'optimal' ? 'normal' : 'temporary'}">${run.strategy_display_name || run.strategy_name}</span>
+                    <span class="expand-icon" id="expand-icon-${run.id}">▶</span>
+                </div>
+                <div class="task-details">
+                    <div>工期: <strong>${run.makespan || '-'}</strong> 分钟 | 求解时间: ${run.solve_time || 0}s</div>
+                    <div>任务数: ${run.num_tasks || 0} | 机车数: ${run.num_locomotives || 0}</div>
+                    <div>状态: <span class="status-badge status-${run.solve_status}">${run.solve_status}</span> | ${run.created_at}</div>
+                </div>
             </div>
-            <div class="task-details">
-                <div>工期: ${run.makespan || '-'} 分钟 | 求解时间: ${run.solve_time || 0}s</div>
-                <div>任务数: ${run.num_tasks || 0} | 机车数: ${run.num_locomotives || 0}</div>
-                <div>状态: ${run.solve_status} | ${run.created_at}</div>
-            </div>
+            <div class="history-detail" id="history-detail-${run.id}" style="display:none;"></div>
         </div>
     `).join('');
 }
 
-function viewRunDetail(runId) {
-    apiCall('/runs/' + runId).then(result => {
+// 缓存已加载的详情
+const historyDetailCache = {};
+
+async function toggleHistoryDetail(runId) {
+    const detailDiv = document.getElementById('history-detail-' + runId);
+    const icon = document.getElementById('expand-icon-' + runId);
+    if (!detailDiv) return;
+
+    // 如果已展开，则折叠
+    if (detailDiv.style.display === 'block') {
+        detailDiv.style.display = 'none';
+        if (icon) icon.textContent = '▶';
+        return;
+    }
+
+    // 展开
+    detailDiv.style.display = 'block';
+    if (icon) icon.textContent = '▼';
+
+    // 如果已缓存，直接显示
+    if (historyDetailCache[runId]) {
+        detailDiv.innerHTML = historyDetailCache[runId];
+        return;
+    }
+
+    // 显示加载中
+    detailDiv.innerHTML = '<p style="text-align:center;padding:16px;color:#666;">加载中...</p>';
+
+    try {
+        const result = await apiCall('/runs/' + runId);
         if (result.success && result.data) {
-            alert('运行记录详情已获取，可扩展查看');
-            console.log(result.data);
+            const html = buildHistoryDetailHTML(result.data);
+            historyDetailCache[runId] = html;
+            detailDiv.innerHTML = html;
+        } else {
+            detailDiv.innerHTML = '<p style="color:red;">加载失败: ' + (result.error || '未知错误') + '</p>';
         }
-    });
+    } catch (e) {
+        detailDiv.innerHTML = '<p style="color:red;">加载出错: ' + e.message + '</p>';
+    }
+}
+
+function buildHistoryDetailHTML(data) {
+    const assignments = data.assignments || [];
+    const result = data.result || {};
+
+    let html = '<div class="history-detail-content">';
+
+    // 摘要卡片
+    html += `
+        <div class="result-summary" style="margin-bottom:12px;">
+            <div class="result-card">
+                <div class="value">${data.makespan || '-'}</div>
+                <div class="label">总工期</div>
+            </div>
+            <div class="result-card">
+                <div class="value">${data.solve_time || '-'}s</div>
+                <div class="label">求解时间</div>
+            </div>
+            <div class="result-card">
+                <div class="value">${data.num_tasks || '-'}</div>
+                <div class="label">任务数</div>
+            </div>
+            <div class="result-card">
+                <div class="value">${data.num_locomotives || '-'}</div>
+                <div class="label">机车数</div>
+            </div>
+        </div>
+    `;
+
+    // 任务分配表格
+    if (assignments.length > 0) {
+        html += '<h4 style="margin:12px 0 8px;">任务分配详情</h4>';
+        html += '<div class="table-scroll" style="max-height:400px;overflow-y:auto;">';
+        html += '<table class="comparison-table"><thead><tr><th>任务ID</th><th>机车</th><th>路径</th><th>开始</th><th>装货结束</th><th>运输结束</th><th>卸货结束</th></tr></thead><tbody>';
+        assignments.forEach(a => {
+            const path = a.path ? (typeof a.path === 'string' ? a.path : JSON.parse(a.path || '[]').join(' → ')) : '-';
+            html += `<tr>
+                <td>${a.task_id || '-'}</td>
+                <td>${a.locomotive_id || '-'}</td>
+                <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${path}">${path}</td>
+                <td>${a.start_time !== undefined ? a.start_time : '-'}</td>
+                <td>${a.loading_end !== undefined ? a.loading_end : '-'}</td>
+                <td>${a.transport_end !== undefined ? a.transport_end : '-'}</td>
+                <td>${a.unloading_end !== undefined ? a.unloading_end : '-'}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+    } else {
+        html += '<p class="text-muted">无任务分配记录</p>';
+    }
+
+    // 如果有result对象，显示额外信息
+    if (result.assignments && result.assignments.length > 0) {
+        html += '<h4 style="margin:12px 0 8px;">调度结果</h4>';
+        if (result.solve_status) {
+            html += `<p>求解状态: <strong>${result.solve_status}</strong></p>`;
+        }
+        if (result.message) {
+            html += `<p>${result.message}</p>`;
+        }
+    }
+
+    html += '</div>';
+    return html;
 }
 
 async function loadBatchHistory() {

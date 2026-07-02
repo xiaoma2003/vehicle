@@ -974,3 +974,53 @@ header h1 {
 .form-input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2); }
 .form-select { width: 100%; padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 5px; font-size: 14px; background: #fff; cursor: pointer; }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+/* 历史记录可扩展查看 */
+.history-item {
+    margin-bottom: 8px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    transition: border-color 0.2s;
+}
+.history-item:hover {
+    border-color: #667eea;
+}
+.history-item .task-item {
+    border: none;
+    border-radius: 0;
+    margin-bottom: 0;
+}
+.expand-icon {
+    font-size: 12px;
+    color: #667eea;
+    margin-left: auto;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.history-detail {
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+    padding: 16px;
+    animation: slideDown 0.2s ease;
+}
+@keyframes slideDown {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 1000px; }
+}
+.history-detail-content {
+    font-size: 13px;
+}
+.history-detail-content .result-summary {
+    margin-top: 0;
+}
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+.status-badge.status-optimal { background: #d4edda; color: #155724; }
+.status-badge.status-feasible { background: #cce5ff; color: #004085; }
+.status-badge.status-infeasible { background: #f8d7da; color: #721c24; }
