@@ -225,6 +225,13 @@ class ScheduleAPI:
         if existing is None:
             return {"success": False, "error": f"机车不存在: {loco_id}"}
 
+        # 支持修改机车ID：检查新ID是否与已存在的其他机车冲突
+        new_id = locomotive.get("new_id")
+        if new_id and new_id != loco_id:
+            if any(l["id"] == new_id for l in loco_list):
+                return {"success": False, "error": f"机车ID已存在: {new_id}"}
+            existing["id"] = new_id
+
         # 更新允许的字段
         allowed_fields = [
             "traction_type", "Q", "max_speed", "initial_node",

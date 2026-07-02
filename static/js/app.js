@@ -1723,6 +1723,7 @@ async function editLocomotive(locoId) {
     const loco = currentLocomotivesData.locomotives.find(l => l.id === locoId);
     if (!loco) { alert('机车不存在'); return; }
 
+    document.getElementById('loco-edit-original-id').value = loco.id;
     document.getElementById('loco-edit-id').value = loco.id;
     document.getElementById('loco-edit-traction').value = loco.traction_type || 'electric';
     document.getElementById('loco-edit-q').value = loco.Q || 50;
@@ -1748,10 +1749,16 @@ async function editLocomotive(locoId) {
 
 async function saveLocoEdit(e) {
     e.preventDefault();
-    const locoId = document.getElementById('loco-edit-id').value;
+    const originalId = document.getElementById('loco-edit-original-id').value;
+    const newId = document.getElementById('loco-edit-id').value.trim();
+    if (!newId) {
+        alert('请输入机车ID');
+        return;
+    }
     const traction = document.getElementById('loco-edit-traction').value;
     const data = {
-        id: locoId,
+        id: originalId,
+        new_id: newId !== originalId ? newId : undefined,
         traction_type: traction,
         Q: parseInt(document.getElementById('loco-edit-q').value) || 50,
         max_speed: parseInt(document.getElementById('loco-edit-speed').value) || 800,
