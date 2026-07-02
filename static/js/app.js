@@ -138,6 +138,9 @@ async function loadHyperParams() {
     if (result.success && result.data) {
         currentHyperParams = result.data;
         renderHyperParamsForm(result.data);
+        if (dynamicMap) {
+            dynamicMap.setHyperParams(result.data);
+        }
     }
     return result;
 }

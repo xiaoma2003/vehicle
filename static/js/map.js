@@ -28,6 +28,8 @@ class DynamicMap {
         this.onProgressUpdate = null;
         this.coordDisplay = { x: 0, y: 0, visible: false };
 
+        this.safetyGap = 5; // 默认安全间隔（分钟）
+
         this.nodeColors = {
             station: '#667eea',
             fuel_station: '#ff9800',
@@ -94,8 +96,44 @@ class DynamicMap {
         }
     }
 
+    setHyperParams(params) {
+        if (params && params.safety_gap !== undefined) {
+            this.safetyGap = params.safety_gap;
+        }
+    }
+
     setProgressCallback(callback) {
         this.onProgressUpdate = callback;
+    }
+
+    _getEdgeKey(fromNode, toNode) {
+        const nodes = [fromNode, toNode].sort();
+        return nodes[0] + '-' + nodes[1];
+    }
+
+    _getEdgeDirection(fromNode, toNode) {
+        const edge = this.edges.find(e =>
+            (e.from === fromNode && e.to === toNode) ||
+            (e.from === toNode && e.to === fromNode)
+        );
+        if (!edge) return null;
+        if (edge.from === fromNode && edge.to === toNode) return 'forward';
+        return 'backward';
+    }
+
+    _getEdgeConfig(fromNode, toNode) {
+        return this.edges.find(e =>
+            (e.from === fromNode && e.to === toNode) ||
+            (e.from === toNode && e.to === fromNode)
+        );
+    }
+
+    _computeEdgeEntryTime(segments, segIndex, loadingEnd) {
+        let cumulative = 0;
+        for (let i = 0; i < segIndex; i++) {
+            cumulative += segments[i].time || 0;
+        }
+        return loadingEnd + cumulative;
     }
 
     fitToView() {
@@ -251,13 +289,31 @@ class DynamicMap {
             let lineWidth = 2;
 
             if (this.isPlaying) {
-                const hasActiveVehicle = this.assignments.some(a => {
-                    const path = a.path || [];
-                    return path.includes(edge.from) && path.includes(edge.to);
+                // 播放时：根据当前边上的车辆方向着色
+                const ek = this._getEdgeKey(edge.from, edge.to);
+                const vehiclesOnEdge = this.assignments.filter(a => {
+                    const segs = a.segments || [];
+                    const loadingEnd = a.loading_end || 0;
+                    const transportEnd = a.transport_end || 0;
+                    if (this.currentTime < loadingEnd || this.currentTime > transportEnd) return false;
+                    // 检查车辆是否正在这条边上
+                    return segs.some(s => this._getEdgeKey(s.from, s.to) === ek);
                 });
-                if (hasActiveVehicle) {
-                    color = '#667eea';
-                    lineWidth = 2.5;
+                if (vehiclesOnEdge.length > 0) {
+                    const dirs = vehiclesOnEdge.map(v => {
+                        const segs = v.segments || [];
+                        const seg = segs.find(s => this._getEdgeKey(s.from, s.to) === ek);
+                        return seg ? this._getEdgeDirection(seg.from, seg.to) : null;
+                    }).filter(Boolean);
+                    const uniqueDirs = [...new Set(dirs)];
+                    if (uniqueDirs.length === 1) {
+                        color = uniqueDirs[0] === 'forward' ? '#e53e3e' : '#3182ce';
+                        lineWidth = 3;
+                    } else {
+                        // 冲突：红色闪烁警告
+                        color = '#e53e3e';
+                        lineWidth = 3.5;
+                    }
                 }
             }
 
@@ -422,60 +478,242 @@ class DynamicMap {
     drawAssignments() {
         if (!this.isPlaying || this.assignments.length === 0) return;
         const ctx = this.ctx;
+        const safetyGap = this.safetyGap || 5;
 
+        // ===== 第一步：计算每辆车的原始位置 =====
+        let allVehicles = [];
         this.assignments.forEach(assignment => {
             const path = assignment.path || [];
+            const segments = assignment.segments || [];
             if (path.length < 2) return;
 
             const startTime = assignment.start_time || 0;
-            const endTime = assignment.unloading_end || 100;
-            if (this.currentTime < startTime || this.currentTime > endTime) return;
+            const loadingEnd = assignment.loading_end || startTime;
+            const transportEnd = assignment.transport_end || loadingEnd;
+            const unloadingEnd = assignment.unloading_end || transportEnd;
 
-            const totalDuration = endTime - startTime;
-            const elapsed = this.currentTime - startTime;
-            const progress = Math.min(1, Math.max(0, elapsed / totalDuration));
-            const easedProgress = this.easeInOutQuad(progress);
+            if (this.currentTime < startTime || this.currentTime > unloadingEnd) return;
 
-            const segCount = path.length - 1;
-            const segProgress = easedProgress * segCount;
-            const currentSeg = Math.min(segCount - 1, Math.floor(segProgress));
-            const segFraction = segProgress - currentSeg;
+            let phase, segIndex, segFraction;
+            let edgeFrom = null, edgeTo = null;
 
-            const fromNode = this.nodes.find(n => n.id === path[currentSeg]);
-            const toNode = this.nodes.find(n => n.id === path[currentSeg + 1]);
-            if (!fromNode || !toNode) return;
+            if (this.currentTime < loadingEnd) {
+                // 空驶/装载阶段：停靠在起点站
+                phase = 'loading';
+                segIndex = 0;
+                segFraction = 0;
+            } else if (this.currentTime < transportEnd) {
+                // 运输阶段：沿路径行驶
+                phase = 'transport';
+                const transportDuration = transportEnd - loadingEnd;
+                if (transportDuration <= 0 || segments.length === 0) {
+                    segIndex = 0;
+                    segFraction = 0;
+                } else {
+                    const elapsed = this.currentTime - loadingEnd;
+                    let cumulative = 0;
+                    segIndex = 0;
+                    segFraction = 0;
+                    for (let i = 0; i < segments.length; i++) {
+                        const segTime = segments[i].time || 0;
+                        if (segTime <= 0) continue;
+                        if (elapsed <= cumulative + segTime) {
+                            segIndex = i;
+                            segFraction = (elapsed - cumulative) / segTime;
+                            break;
+                        }
+                        cumulative += segTime;
+                        if (i === segments.length - 1) {
+                            segIndex = i;
+                            segFraction = 1;
+                        }
+                    }
+                }
+                if (segments[segIndex]) {
+                    edgeFrom = segments[segIndex].from;
+                    edgeTo = segments[segIndex].to;
+                }
+            } else {
+                // 卸载阶段：停靠在终点站
+                phase = 'unloading';
+                segIndex = Math.max(0, segments.length - 1);
+                segFraction = 1;
+            }
 
-            const from = this.worldToScreen(fromNode.x || 0, fromNode.y || 0);
-            const to = this.worldToScreen(toNode.x || 0, toNode.y || 0);
-            const vehicleX = from.x + (to.x - from.x) * segFraction;
-            const vehicleY = from.y + (to.y - from.y) * segFraction;
+            allVehicles.push({
+                assignment,
+                path,
+                segments,
+                phase,
+                segIndex,
+                segFraction,
+                edgeFrom,
+                edgeTo,
+                edgeDirection: edgeFrom ? this._getEdgeDirection(edgeFrom, edgeTo) : null,
+                loadingEnd,
+                transportEnd,
+                // 计算进入当前边的实际时间
+                edgeEntryTime: this._computeEdgeEntryTime(segments, segIndex, loadingEnd),
+            });
+        });
 
-            const loco = this.vehicles.find(v => v.id === assignment.locomotive_id);
+        // ===== 第二步：应用边约束 =====
+        // 按边分组
+        let edgeVehicles = {};
+        allVehicles.forEach(v => {
+            if (v.phase !== 'transport' || !v.edgeFrom || !v.edgeTo) return;
+            const ek = this._getEdgeKey(v.edgeFrom, v.edgeTo);
+            if (!edgeVehicles[ek]) edgeVehicles[ek] = [];
+            edgeVehicles[ek].push(v);
+        });
+
+        // 逐边解决冲突
+        for (let [ek, vehicles] of Object.entries(edgeVehicles)) {
+            if (vehicles.length < 2) continue;
+
+            // 分离上行/下行
+            let fwd = vehicles.filter(v => v.edgeDirection === 'forward');
+            let bwd = vehicles.filter(v => v.edgeDirection === 'backward');
+
+            // ---- 反向冲突：只允许一个方向通行 ----
+            if (fwd.length > 0 && bwd.length > 0) {
+                // 先进入边的一方获得通行权（按实际边进入时间）
+                const fwdFirstEntry = Math.min(...fwd.map(v => v.edgeEntryTime));
+                const bwdFirstEntry = Math.min(...bwd.map(v => v.edgeEntryTime));
+
+                if (fwdFirstEntry <= bwdFirstEntry) {
+                    // 上行优先，下行车辆在节点等待
+                    bwd.forEach(v => {
+                        v.segFraction = 0;
+                        v.phase = 'waiting';
+                    });
+                } else {
+                    // 下行优先，上行车辆在节点等待
+                    fwd.forEach(v => {
+                        v.segFraction = 0;
+                        v.phase = 'waiting';
+                    });
+                }
+            }
+
+            // ---- 同向安全距离：不能超车，保持间隔 ----
+            let active = vehicles.filter(v => v.phase === 'transport');
+            if (active.length > 1) {
+                const dir = active[0].edgeDirection;
+                // 按沿边位置排序（从入口到出口）
+                if (dir === 'forward') {
+                    active.sort((a, b) => a.segFraction - b.segFraction);
+                } else {
+                    active.sort((a, b) => b.segFraction - a.segFraction);
+                }
+
+                // 从前到后，每个后车与前车保持安全间隔
+                for (let i = 0; i < active.length - 1; i++) {
+                    const front = active[i];
+                    const rear = active[i + 1];
+
+                    const segTime = (front.segments[front.segIndex] && front.segments[front.segIndex].time) || 1;
+                    if (segTime <= 0) continue;
+                    const safetyFraction = safetyGap / segTime;
+
+                    let gap;
+                    if (dir === 'forward') {
+                        gap = rear.segFraction - front.segFraction;
+                    } else {
+                        gap = front.segFraction - rear.segFraction;
+                    }
+
+                    if (gap < safetyFraction) {
+                        if (dir === 'forward') {
+                            rear.segFraction = Math.max(0, front.segFraction + safetyFraction);
+                        } else {
+                            rear.segFraction = Math.min(1, front.segFraction - safetyFraction);
+                        }
+                        // 如果被推到边外，标记为等待
+                        if (rear.segFraction <= 0 || rear.segFraction >= 1) {
+                            rear.segFraction = 0;
+                            rear.phase = 'waiting';
+                        }
+                    }
+                }
+            }
+        }
+
+        // ===== 第三步：渲染所有车辆 =====
+        allVehicles.forEach(v => {
+            const path = v.path;
+            const loco = this.vehicles.find(veh => veh.id === v.assignment.locomotive_id);
             const isElectric = loco ? loco.traction_type === 'electric' : false;
             const vehicleColor = isElectric ? '#4caf50' : '#ff9800';
 
+            let vehicleX, vehicleY;
+            let nodeIndex;
+
+            if (v.phase === 'loading') {
+                // 在起点站装载
+                nodeIndex = 0;
+                const node = this.nodes.find(n => n.id === path[nodeIndex]);
+                if (!node) return;
+                const pos = this.worldToScreen(node.x || 0, node.y || 0);
+                vehicleX = pos.x;
+                vehicleY = pos.y;
+            } else if (v.phase === 'waiting') {
+                // 在边入口节点等待
+                const seg = v.segments[v.segIndex];
+                const waitNodeId = seg ? seg.from : path[0];
+                const node = this.nodes.find(n => n.id === waitNodeId);
+                if (!node) return;
+                const pos = this.worldToScreen(node.x || 0, node.y || 0);
+                vehicleX = pos.x;
+                vehicleY = pos.y;
+            } else if (v.phase === 'unloading') {
+                // 在终点站卸载
+                nodeIndex = path.length - 1;
+                const node = this.nodes.find(n => n.id === path[nodeIndex]);
+                if (!node) return;
+                const pos = this.worldToScreen(node.x || 0, node.y || 0);
+                vehicleX = pos.x;
+                vehicleY = pos.y;
+            } else {
+                // 运输中：沿当前段线性插值
+                nodeIndex = v.segIndex;
+                const fromNode = this.nodes.find(n => n.id === path[nodeIndex]);
+                const toNode = this.nodes.find(n => n.id === path[nodeIndex + 1]);
+                if (!fromNode || !toNode) return;
+                const from = this.worldToScreen(fromNode.x || 0, fromNode.y || 0);
+                const to = this.worldToScreen(toNode.x || 0, toNode.y || 0);
+                const frac = Math.max(0, Math.min(1, v.segFraction));
+                vehicleX = from.x + (to.x - from.x) * frac;
+                vehicleY = from.y + (to.y - from.y) * frac;
+            }
+
+            // 绘制车辆圆点
             ctx.beginPath();
             ctx.arc(vehicleX, vehicleY, 8, 0, Math.PI * 2);
             ctx.fillStyle = vehicleColor;
             ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = v.phase === 'waiting' ? '#f44336' : '#fff';
+            ctx.lineWidth = v.phase === 'waiting' ? 2.5 : 1.5;
             ctx.stroke();
 
+            // 图标
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 9px Arial';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(isElectric ? '⚡' : '⛽', vehicleX, vehicleY);
 
+            // 机车ID
             ctx.fillStyle = vehicleColor;
             ctx.font = 'bold 9px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(assignment.locomotive_id || '', vehicleX, vehicleY - 18);
+            ctx.fillText(v.assignment.locomotive_id || '', vehicleX, vehicleY - 18);
 
-            ctx.fillStyle = '#1a202c';
+            // 任务ID + 等待标记
+            let label = v.assignment.task_id || '';
+            if (v.phase === 'waiting') label += ' ⏳';
+            ctx.fillStyle = v.phase === 'waiting' ? '#f44336' : '#1a202c';
             ctx.font = '9px Arial';
-            ctx.fillText(assignment.task_id || '', vehicleX, vehicleY - 28);
+            ctx.fillText(label, vehicleX, vehicleY - 28);
         });
     }
 
