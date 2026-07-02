@@ -158,6 +158,176 @@ class CPSATScheduler:
     def _ceil(self, minutes: float) -> int:
         return int(math.ceil(minutes / self.precision) * self.precision)
 
+    def _resolve_edge_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """后处理：调整CP-SAT输出以消除边冲突"""
+        safety_gap = self.hyper_params.get("safety_gap", 5)
+        loading = self.hyper_params["loading_time"]
+        unloading = self.hyper_params["unloading_time"]
+
+        # 按开始时间排序
+        sorted_assignments = sorted(assignments, key=lambda a: a["start_time"])
+        edge_occupancy = {}  # edge_key -> [(entry_time, exit_time, direction), ...]
+        loco_position = {}   # loco_id -> current_node (追踪机车当前位置)
+        adjusted = []
+
+        for a in sorted_assignments:
+            loco_id = a["locomotive_id"]
+            tid = a["task_id"]
+            task = next((t for t in self.tasks if t["id"] == tid), None)
+            if task is None:
+                adjusted.append(a)
+                continue
+
+            loco = next((l for l in self.locomotives if l["id"] == loco_id), None)
+            if loco is None:
+                adjusted.append(a)
+                continue
+
+            # 确定机车当前位置（初始位置或上一任务的终点）
+            current_node = loco_position.get(loco_id, loco["initial_node"])
+
+            job_path_info = self.precomputed_paths[loco_id][task["start_node"]][task["end_node"]]
+            empty_path_info = self.precomputed_paths[loco_id][current_node][task["start_node"]]
+
+            # 调整开始时间以避免边冲突
+            start_time = float(a["start_time"])
+            max_iterations = 20
+            for _ in range(max_iterations):
+                new_start = start_time
+
+                # 检查空驶路径边
+                cumulative = start_time
+                for seg in empty_path_info.get("segments", []):
+                    entry = cumulative
+                    exit_t = entry + seg["time"]
+                    delay = self._find_edge_delay(seg["from"], seg["to"], entry, exit_t,
+                                                  cumulative - start_time, edge_occupancy, safety_gap)
+                    if delay is not None:
+                        needed_start = delay
+                        if needed_start > new_start:
+                            new_start = needed_start
+                    cumulative += seg["time"]
+
+                # 检查作业路径边
+                cumulative = start_time + empty_path_info["time"] + loading
+                for seg in job_path_info.get("segments", []):
+                    entry = cumulative
+                    exit_t = entry + seg["time"]
+                    delay = self._find_edge_delay(seg["from"], seg["to"], entry, exit_t,
+                                                  cumulative - start_time, edge_occupancy, safety_gap)
+                    if delay is not None:
+                        needed_start = delay
+                        if needed_start > new_start:
+                            new_start = needed_start
+                    cumulative += seg["time"]
+
+                if new_start == start_time:
+                    break
+                start_time = new_start
+
+            # 使用调整后的时间更新分配
+            empty_time = empty_path_info["time"]
+            job_time = job_path_info["time"]
+            loading_end = start_time + empty_time + loading
+            transport_end = loading_end + job_time
+            unloading_end = transport_end + unloading
+
+            adjusted_a = {
+                "task_id": tid,
+                "locomotive_id": loco_id,
+                "start_time": start_time,
+                "loading_end": loading_end,
+                "transport_end": transport_end,
+                "unloading_end": unloading_end,
+                "path": a["path"],
+                "segments": a["segments"]
+            }
+
+            adjusted.append(adjusted_a)
+
+            # 记录边占用
+            self._add_edge_occupancy(start_time, empty_path_info, job_path_info, edge_occupancy)
+
+            # 更新机车位置
+            loco_position[loco_id] = task["end_node"]
+
+        return adjusted
+
+    def _find_edge_delay(self, from_n, to_n, entry, exit_t, offset, edge_occupancy, safety_gap):
+        """检查单条边的冲突，返回需要延迟到的开始时间（无冲突返回 None）"""
+        nodes = sorted([from_n, to_n])
+        edge_key = f"{nodes[0]}-{nodes[1]}"
+
+        if edge_key not in edge_occupancy:
+            return None
+
+        edge = next((e for e in self.map_config["edges"]
+                    if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
+                       (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
+        if edge is None:
+            return None
+
+        if edge["from"] == from_n and edge["to"] == to_n:
+            task_dir = "forward"
+        else:
+            task_dir = "backward"
+
+        eps = 1e-6  # 浮点精度容差
+        max_delay = None
+        for occ_entry, occ_exit, occ_dir in edge_occupancy[edge_key]:
+            if task_dir != occ_dir:
+                # 反向：仅检查是否重叠（加eps容差避免浮点边界问题）
+                if entry >= occ_exit - eps or exit_t <= occ_entry + eps:
+                    continue
+                delay = occ_exit - offset
+            else:
+                # 同向：需要保持安全间隔，即使不重叠也要检查间隔
+                if entry >= occ_exit + safety_gap - eps:
+                    continue
+                if exit_t + safety_gap <= occ_entry + eps:
+                    continue
+                # 间隔不足（无论新车在前在后），延迟新车到前车之后
+                delay = occ_exit + safety_gap - offset
+
+            if max_delay is None or delay > max_delay:
+                max_delay = delay
+
+        return max_delay
+
+    def _add_edge_occupancy(self, start_time, empty_path_info, job_path_info, edge_occupancy):
+        """记录任务的边占用信息"""
+        loading = self.hyper_params["loading_time"]
+
+        cumulative = start_time
+        for seg in empty_path_info.get("segments", []):
+            self._mark_edge_occupied(seg["from"], seg["to"], cumulative, cumulative + seg["time"], edge_occupancy)
+            cumulative += seg["time"]
+
+        cumulative = start_time + empty_path_info["time"] + loading
+        for seg in job_path_info.get("segments", []):
+            self._mark_edge_occupied(seg["from"], seg["to"], cumulative, cumulative + seg["time"], edge_occupancy)
+            cumulative += seg["time"]
+
+    def _mark_edge_occupied(self, from_n, to_n, entry, exit_t, edge_occupancy):
+        """标记一条边被占用"""
+        nodes = sorted([from_n, to_n])
+        edge_key = f"{nodes[0]}-{nodes[1]}"
+
+        edge = next((e for e in self.map_config["edges"]
+                    if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
+                       (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
+        if edge is None:
+            return
+
+        if edge["from"] == from_n and edge["to"] == to_n:
+            task_dir = "forward"
+        else:
+            task_dir = "backward"
+
+        if edge_key not in edge_occupancy:
+            edge_occupancy[edge_key] = []
+        edge_occupancy[edge_key].append((entry, exit_t, task_dir))
+
     def solve(self) -> Dict[str, Any]:
         model = cp_model.CpModel()
 
@@ -346,8 +516,8 @@ class CPSATScheduler:
         # 同向车辆之间保持安全间隔
         safety_gap = self.hyper_params.get("safety_gap", 5)
 
-        # 使用参考机车预计算每条边的占用时间窗口
-        ref_loco = schedulable_locomotives[0]
+        # 使用最慢机车预计算每条边的占用时间窗口（最保守估计）
+        ref_loco = min(schedulable_locomotives, key=lambda l: l["max_speed"])
         ref_lid = ref_loco["id"]
 
         # edge_key -> [(task_id, edge_direction, task_dir, entry_offset, exit_offset), ...]
@@ -400,9 +570,9 @@ class CPSATScheduler:
                     task_dir1, task_dir2 = t1["task_dir"], t2["task_dir"]
 
                     off1_entry = int(t1["entry_offset"])
-                    off1_exit = int(t1["exit_offset"])
+                    off1_exit = self._ceil(t1["exit_offset"])
                     off2_entry = int(t2["entry_offset"])
-                    off2_exit = int(t2["exit_offset"])
+                    off2_exit = self._ceil(t2["exit_offset"])
 
                     is_opposite = (task_dir1 == "forward" and task_dir2 == "backward") or \
                                   (task_dir1 == "backward" and task_dir2 == "forward")
@@ -474,10 +644,12 @@ class CPSATScheduler:
                     "segments": path_info["segments"]
                 })
 
+            # 后处理：消除边安全冲突
+            assignments = self._resolve_edge_conflicts(assignments)
+
             return {
                 "solve_status": "optimal" if status == cp_model.OPTIMAL else "feasible",
-                "makespan": max(solver.Value(makespan),
-                               max((info["unloading_end"] for info in assigned_tasks.values()), default=0)),
+                "makespan": max((a["unloading_end"] for a in assignments), default=0),
                 "assignments": assignments,
                 "num_tasks": len(assignments),
                 "num_locomotives": len(schedulable_locomotives) + len(assigned_tasks),

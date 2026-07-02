@@ -3,6 +3,7 @@
 基于优先级和最短路径的贪心调度策略
 """
 import random
+import math
 from typing import Dict, List, Any, Tuple
 
 
@@ -20,7 +21,7 @@ class GreedyScheduler:
         safety_gap = self.hyper_params.get("safety_gap", 5)
         loading = self.hyper_params["loading_time"]
 
-        max_iterations = 100  # 防止无限循环
+        max_iterations = 20  # 防止无限循环
         for _ in range(max_iterations):
             new_start = start_time
 
@@ -71,20 +72,86 @@ class GreedyScheduler:
         else:
             task_dir = "backward"
 
+        eps = 1e-6  # 浮点精度容差
         max_delay = None
         for occ_entry, occ_exit, occ_dir in edge_occupancy[edge_key]:
-            if entry >= occ_exit or exit_t <= occ_entry:
-                continue
-
             if task_dir != occ_dir:
+                # 反向：仅检查是否重叠（加eps容差避免浮点边界问题）
+                if entry >= occ_exit - eps or exit_t <= occ_entry + eps:
+                    continue
                 delay = occ_exit - offset
             else:
+                # 同向：需要保持安全间隔，即使不重叠也要检查间隔
+                if entry >= occ_exit + safety_gap - eps:
+                    continue  # 新车在前车之后，且有足够间隔
+                if exit_t + safety_gap <= occ_entry + eps:
+                    continue  # 新车在前车之前，且有足够间隔
+                # 间隔不足（无论新车在前在后），延迟新车到前车之后
                 delay = occ_exit + safety_gap - offset
 
             if max_delay is None or delay > max_delay:
                 max_delay = delay
 
         return max_delay
+
+    def _resolve_all_edge_conflicts(self, assignments):
+        """后处理：按开始时间排序，重新检查并解决所有边冲突"""
+        if not assignments:
+            return assignments
+
+        max_iterations = 10
+        for _ in range(max_iterations):
+            changed = False
+            # 按开始时间排序
+            sorted_assignments = sorted(assignments, key=lambda a: a["start_time"])
+            edge_occupancy = {}
+            loco_pos = {}
+
+            new_assignments = []
+            for a in sorted_assignments:
+                tid = a["task_id"]
+                loco_id = a["locomotive_id"]
+                task = next((t for t in self.tasks if t["id"] == tid), None)
+                loco = next((l for l in self.locomotives if l["id"] == loco_id), None)
+                if not task or not loco:
+                    new_assignments.append(a)
+                    continue
+
+                current_node = loco_pos.get(loco_id, loco["initial_node"])
+                empty_path_info = self.precomputed_paths[loco_id][current_node][task["start_node"]]
+                job_path_info = self.precomputed_paths[loco_id][task["start_node"]][task["end_node"]]
+
+                # 检查边安全约束
+                adjusted_start = self._adjust_for_edge_safety(
+                    a["start_time"], empty_path_info, job_path_info, edge_occupancy
+                )
+
+                if adjusted_start != a["start_time"]:
+                    changed = True
+
+                # 始终重新计算时间（原始值可能被 round 过，导致不一致）
+                loading = self.hyper_params["loading_time"]
+                unloading = self.hyper_params["unloading_time"]
+                empty_time = empty_path_info["time"]
+                job_time = job_path_info["time"]
+
+                a["start_time"] = adjusted_start
+                a["loading_end"] = adjusted_start + empty_time + loading
+                a["transport_end"] = a["loading_end"] + job_time
+                a["unloading_end"] = a["transport_end"] + unloading
+
+                # 记录边占用
+                self._add_edge_occupancy(
+                    a["start_time"], empty_path_info, job_path_info, edge_occupancy
+                )
+                loco_pos[loco_id] = task["end_node"]
+                new_assignments.append(a)
+
+            assignments = new_assignments
+            if not changed:
+                break
+
+        return assignments
 
     def _add_edge_occupancy(self, start_time, empty_path_info, job_path_info, edge_occupancy):
         """记录任务的边占用信息"""
@@ -133,7 +200,6 @@ class GreedyScheduler:
                 bound_loco_ids.add(t["bound_locomotive"])
                 loco = next((l for l in self.locomotives if l["id"] == t["bound_locomotive"]), None)
                 if loco:
-                    import math
                     travel_time = int(math.ceil(
                         self.precomputed_paths[loco["id"]][t["start_node"]][t["end_node"]]["time"]
                         / self.hyper_params["travel_time_precision"]
@@ -245,7 +311,6 @@ class GreedyScheduler:
 
                 if best_loco:
                     loco_id = best_loco["id"]
-                    # 获取最佳机车的空驶路径信息
                     empty_path_info = self.precomputed_paths[loco_id][loco_current_node[loco_id]][task["start_node"]]
                     loading_end = best_start_time + best_empty_time + self.hyper_params["loading_time"]
                     transport_end = loading_end + best_path_info["time"]
@@ -254,10 +319,10 @@ class GreedyScheduler:
                     assignments.append({
                         "task_id": tid,
                         "locomotive_id": loco_id,
-                        "start_time": int(best_start_time),
-                        "loading_end": int(loading_end),
-                        "transport_end": int(transport_end),
-                        "unloading_end": int(unloading_end),
+                        "start_time": round(best_start_time),
+                        "loading_end": round(loading_end),
+                        "transport_end": round(transport_end),
+                        "unloading_end": round(unloading_end),
                         "path": best_path_info["path"],
                         "segments": best_path_info["segments"]
                     })
@@ -274,6 +339,9 @@ class GreedyScheduler:
 
             if not made_progress:
                 break
+
+        # 后处理：按时间顺序重新解决边冲突
+        assignments = self._resolve_all_edge_conflicts(assignments)
 
         # 合并 assigned_tasks（bound 任务）到 assignments
         for tid, info in assigned_tasks.items():

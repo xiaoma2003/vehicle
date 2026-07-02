@@ -140,10 +140,10 @@ class SimulatedAnnealingScheduler:
                     assignments.append({
                         "task_id": tid,
                         "locomotive_id": loco_id,
-                        "start_time": int(best_start_time),
-                        "loading_end": int(loading_end),
-                        "transport_end": int(transport_end),
-                        "unloading_end": int(unloading_end),
+                        "start_time": round(best_start_time),
+                        "loading_end": round(loading_end),
+                        "transport_end": round(transport_end),
+                        "unloading_end": round(unloading_end),
                         "path": best_path_info["path"],
                         "segments": best_path_info["segments"]
                     })
@@ -210,7 +210,7 @@ class SimulatedAnnealingScheduler:
         safety_gap = self.hyper_params.get("safety_gap", 5)
         loading = self.hyper_params["loading_time"]
 
-        max_iterations = 100  # 防止无限循环
+        max_iterations = 20  # 防止无限循环
         for _ in range(max_iterations):
             new_start = start_time
 
@@ -263,22 +263,83 @@ class SimulatedAnnealingScheduler:
         else:
             task_dir = "backward"
 
+        eps = 1e-6  # 浮点精度容差
         max_delay = None
         for occ_entry, occ_exit, occ_dir in edge_occupancy[edge_key]:
-            if entry >= occ_exit or exit_t <= occ_entry:
-                continue  # 不重叠，无冲突
-
             if task_dir != occ_dir:
-                # 反向冲突：必须等到占用结束后才能进入
+                # 反向：仅检查是否重叠（加eps容差避免浮点边界问题）
+                if entry >= occ_exit - eps or exit_t <= occ_entry + eps:
+                    continue
                 delay = occ_exit - offset
             else:
-                # 同向：需要安全间隔
+                # 同向：需要保持安全间隔，即使不重叠也要检查间隔
+                if entry >= occ_exit + safety_gap - eps:
+                    continue
+                if exit_t + safety_gap <= occ_entry + eps:
+                    continue
+                # 间隔不足（无论新车在前在后），延迟新车到前车之后
                 delay = occ_exit + safety_gap - offset
 
             if max_delay is None or delay > max_delay:
                 max_delay = delay
 
         return max_delay
+
+    def _resolve_all_edge_conflicts(self, assignments):
+        """后处理：按开始时间排序，重新检查并解决所有边冲突"""
+        if not assignments:
+            return assignments
+
+        max_iterations = 10
+        for _ in range(max_iterations):
+            changed = False
+            sorted_assignments = sorted(assignments, key=lambda a: a["start_time"])
+            edge_occupancy = {}
+            loco_pos = {}
+
+            new_assignments = []
+            for a in sorted_assignments:
+                tid = a["task_id"]
+                loco_id = a["locomotive_id"]
+                task = next((t for t in self.tasks if t["id"] == tid), None)
+                loco = next((l for l in self.locomotives if l["id"] == loco_id), None)
+                if not task or not loco:
+                    new_assignments.append(a)
+                    continue
+
+                current_node = loco_pos.get(loco_id, loco["initial_node"])
+                empty_path_info = self.precomputed_paths[loco_id][current_node][task["start_node"]]
+                job_path_info = self.precomputed_paths[loco_id][task["start_node"]][task["end_node"]]
+
+                adjusted_start = self._adjust_for_edge_safety(
+                    a["start_time"], empty_path_info, job_path_info, edge_occupancy
+                )
+
+                if adjusted_start != a["start_time"]:
+                    changed = True
+
+                # 始终重新计算时间（原始值可能被 round 过，导致不一致）
+                loading = self.hyper_params["loading_time"]
+                unloading = self.hyper_params["unloading_time"]
+                empty_time = empty_path_info["time"]
+                job_time = job_path_info["time"]
+
+                a["start_time"] = adjusted_start
+                a["loading_end"] = adjusted_start + empty_time + loading
+                a["transport_end"] = a["loading_end"] + job_time
+                a["unloading_end"] = a["transport_end"] + unloading
+
+                self._add_edge_occupancy(
+                    a["start_time"], empty_path_info, job_path_info, edge_occupancy
+                )
+                loco_pos[loco_id] = task["end_node"]
+                new_assignments.append(a)
+
+            assignments = new_assignments
+            if not changed:
+                break
+
+        return assignments
 
     def _add_edge_occupancy(self, start_time, empty_path_info, job_path_info, edge_occupancy):
         """记录任务的边占用信息"""
@@ -362,6 +423,11 @@ class SimulatedAnnealingScheduler:
                         best_assignments = current_assignments
 
             temp *= cooling_rate
+
+        # 后处理：按时间顺序重新解决边冲突（仅对最优解）
+        best_assignments = self._resolve_all_edge_conflicts(best_assignments)
+        all_end_times = [a["unloading_end"] for a in best_assignments]
+        best_makespan = max(all_end_times) if all_end_times else 0
 
         return {
             "solve_status": "feasible",
