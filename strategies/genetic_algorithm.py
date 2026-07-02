@@ -102,10 +102,6 @@ class GeneticAlgorithmScheduler:
         if edge is None:
             return None
 
-        edge_dir = edge.get("direction", "bidirectional")
-        if edge_dir == "bidirectional":
-            return None
-
         if edge["from"] == from_n and edge["to"] == to_n:
             task_dir = "forward"
         else:
@@ -153,10 +149,6 @@ class GeneticAlgorithmScheduler:
                     if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
                        (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
         if edge is None:
-            return
-
-        edge_dir = edge.get("direction", "bidirectional")
-        if edge_dir == "bidirectional":
             return
 
         if edge["from"] == from_n and edge["to"] == to_n:

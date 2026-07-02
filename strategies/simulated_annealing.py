@@ -258,10 +258,6 @@ class SimulatedAnnealingScheduler:
         if edge is None:
             return None
 
-        edge_dir = edge.get("direction", "bidirectional")
-        if edge_dir == "bidirectional":
-            return None  # 双向边允许双向行驶
-
         if edge["from"] == from_n and edge["to"] == to_n:
             task_dir = "forward"
         else:
@@ -313,10 +309,6 @@ class SimulatedAnnealingScheduler:
                        (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
         if edge is None:
             return
-
-        edge_dir = edge.get("direction", "bidirectional")
-        if edge_dir == "bidirectional":
-            return  # 双向边不需要记录
 
         if edge["from"] == from_n and edge["to"] == to_n:
             task_dir = "forward"

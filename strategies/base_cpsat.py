@@ -355,6 +355,7 @@ class CPSATScheduler:
 
         for task in active_tasks:
             tid = task["id"]
+            # 作业路径边（空驶路径由启发式算法单独处理，CP-SAT 仅约束作业路径以避免求解复杂度过高）
             path_info = self.precomputed_paths[ref_lid][task["start_node"]][task["end_node"]]
             cumulative = empty_times[ref_lid][tid] + loading  # 作业路径从 loading_end 开始
             for seg in path_info.get("segments", []):
@@ -396,17 +397,7 @@ class CPSATScheduler:
                     t2 = tasks_on_edge[j]
 
                     tid1, tid2 = t1["task_id"], t2["task_id"]
-                    edge_dir1, edge_dir2 = t1["edge_dir"], t2["edge_dir"]
                     task_dir1, task_dir2 = t1["task_dir"], t2["task_dir"]
-
-                    # 双向边允许双向行驶，不需要方向约束
-                    # 但同向仍需安全间隔
-                    if edge_dir1 == "bidirectional" and edge_dir2 == "bidirectional":
-                        # 双向边上只加安全间隔，不加方向约束
-                        pass
-                    elif edge_dir1 == "bidirectional" or edge_dir2 == "bidirectional":
-                        # 单向边与双向边：单向边任务方向受限
-                        pass
 
                     off1_entry = int(t1["entry_offset"])
                     off1_exit = int(t1["exit_offset"])
