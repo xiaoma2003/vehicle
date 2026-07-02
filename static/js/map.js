@@ -88,7 +88,7 @@ class DynamicMap {
 
     setSpeed(speed) {
         this.speed = speed;
-        this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
+        this.animationDuration = Math.max(2000, this.maxTime * 500 / speed);
         if (this.isPlaying && !this.isPaused) {
             this.playStartTime = Date.now() - (this.currentTime / this.maxTime) * this.animationDuration;
         }
@@ -580,7 +580,7 @@ class DynamicMap {
         this.vehicleTrails = {};
         this.maxTime = Math.max(...assignments.map(a => a.unloading_end || 0), 1);
         this.speed = speed;
-        this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
+        this.animationDuration = Math.max(2000, this.maxTime * 500 / speed);
         this.playStartTime = Date.now();
     }
 
