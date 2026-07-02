@@ -621,6 +621,7 @@ class DynamicMap {
         this.currentTime = this.maxTime;
         this.vehicleTrails = {};
     }
+}
 
 let dynamicMap = null;
 
