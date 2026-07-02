@@ -21,7 +21,6 @@ class DynamicMap {
         this.isPlaying = false;
         this.isPaused = false;
         this.pauseTime = 0;
-        this.directionLock = { up: false, down: false };
         this.vehicleTrails = {};
         this.maxTime = 0;
         this.playStartTime = 0;
@@ -87,8 +86,12 @@ class DynamicMap {
         this.assignments = assignments;
     }
 
-    setDirectionLock(up, down) {
-        this.directionLock = { up, down };
+    setSpeed(speed) {
+        this.speed = speed;
+        this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
+        if (this.isPlaying && !this.isPaused) {
+            this.playStartTime = Date.now() - (this.currentTime / this.maxTime) * this.animationDuration;
+        }
     }
 
     setProgressCallback(callback) {
@@ -258,10 +261,11 @@ class DynamicMap {
                 }
             }
 
+            // 方向颜色：上行(forward)红色，下行(backward)蓝色
             if (direction === 'forward') {
-                color = this.directionLock.up ? '#f44336' : '#ff6b6b';
+                color = '#e53e3e';
             } else if (direction === 'backward') {
-                color = this.directionLock.down ? '#2196f3' : '#4dabf7';
+                color = '#3182ce';
             }
 
             ctx.strokeStyle = color;
@@ -617,15 +621,6 @@ class DynamicMap {
         this.currentTime = this.maxTime;
         this.vehicleTrails = {};
     }
-
-    setSpeed(speed) {
-        this.speed = speed;
-        this.animationDuration = Math.max(2000, this.maxTime * 15 / speed);
-        if (this.isPlaying && !this.isPaused) {
-            this.playStartTime = Date.now() - (this.currentTime / this.maxTime) * this.animationDuration;
-        }
-    }
-}
 
 let dynamicMap = null;
 

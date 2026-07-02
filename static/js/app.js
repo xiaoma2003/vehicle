@@ -19,8 +19,8 @@ let currentScheduleResult = null;
 let isScheduleRunning = false;
 let scheduleCompleted = false;
 let isScheduleRequesting = false; // 防止重复请求
-let isScheduleComputed = false; // 是否已完成算法运算
 let isSchedulePlaying = false; // 防止重复播放
+let tasksModifiedWhilePaused = false; // 暂停期间任务是否被修改
 
 document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -31,13 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
         loadBatchIds();
         
         // 绑定地图按钮
-        const computeBtn = document.getElementById('mapComputeBtn');
-        if (computeBtn) {
-            computeBtn.addEventListener('click', mapComputeSchedule);
-        }
         const runBtn = document.getElementById('mapRunBtn');
         if (runBtn) {
-            runBtn.addEventListener('click', mapPlaySchedule);
+            runBtn.addEventListener('click', mapRunSchedule);
         }
         const pauseBtn = document.getElementById('mapPauseBtn');
         if (pauseBtn) pauseBtn.addEventListener('click', mapPauseSchedule);
@@ -737,6 +733,7 @@ function addTaskModal() {
 
         const result = await apiCall('/tasks/add', 'POST', task);
         if (result.success) {
+            tasksModifiedWhilePaused = true;
             await loadTasksData();
             loadTasks();
             closeModal();
@@ -826,6 +823,7 @@ function triggerEmergencyModal() {
         };
         const result = await apiCall('/emergency/trigger', 'POST', task);
         if (result.success) {
+            tasksModifiedWhilePaused = true;
             alert(`紧急任务已触发，暂停${result.data.paused_tasks.length}个任务`);
             await loadTasksData();
             loadTasks();
@@ -850,6 +848,7 @@ function boostPriorityModal() {
             boost_amount: boostAmount
         });
         if (result.success) {
+            tasksModifiedWhilePaused = true;
             alert(`优先级提升: ${result.data.old_priority} → ${result.data.new_priority}`);
             await loadTasksData();
             loadTasks();
@@ -858,22 +857,6 @@ function boostPriorityModal() {
             alert('提升失败: ' + result.error);
         }
     });
-}
-
-async function checkDirectionLock() {
-    const direction = document.getElementById('directionSelect').value;
-    const result = await apiCall('/direction/check?direction=' + direction);
-    const statusEl = document.getElementById('directionStatus');
-    if (result.success && result.data) {
-        const isAvail = result.data.is_available;
-        statusEl.textContent = `方向状态: ${isAvail ? '可用' : '占用中'}`;
-        statusEl.className = `direction-status ${isAvail ? '' : 'locked'}`;
-
-        if (dynamicMap) {
-            const lock = result.data.lock_status || { up: false, down: false };
-            dynamicMap.setDirectionLock(lock.up, lock.down);
-        }
-    }
 }
 
 async function loadBatchIds() {
@@ -1232,27 +1215,16 @@ function closeModal() {
 }
 
 function updateMapButtons(running, paused) {
-    const computeBtn = document.getElementById('mapComputeBtn');
     const runBtn = document.getElementById('mapRunBtn');
     const pauseBtn = document.getElementById('mapPauseBtn');
     const resumeBtn = document.getElementById('mapResumeBtn');
     const stopBtn = document.getElementById('mapStopBtn');
 
-    // 运算按钮：运算中或动画播放中禁用
-    if (computeBtn) {
-        computeBtn.disabled = isScheduleRequesting || (running && !paused);
-        computeBtn.style.opacity = computeBtn.disabled ? '0.5' : '1';
-        computeBtn.style.cursor = computeBtn.disabled ? 'not-allowed' : 'pointer';
-        computeBtn.title = isScheduleRequesting ? '运算中...' : (running && !paused) ? '调度演示中，请先暂停' : '开始算法运算';
-    }
-
-    // 执行调度按钮：只有运算完成后才能点击
     if (runBtn) {
-        const canRun = isScheduleComputed && !(running && !paused);
-        runBtn.disabled = !canRun;
-        runBtn.style.opacity = canRun ? '1' : '0.5';
-        runBtn.style.cursor = canRun ? 'pointer' : 'not-allowed';
-        runBtn.title = !isScheduleComputed ? '请先点击"开始运算"' : (running && !paused) ? '调度演示中，请先暂停' : '在地图上演示调度结果';
+        runBtn.disabled = isScheduleRequesting || (running && !paused);
+        runBtn.style.opacity = runBtn.disabled ? '0.5' : '1';
+        runBtn.style.cursor = runBtn.disabled ? 'not-allowed' : 'pointer';
+        runBtn.title = isScheduleRequesting ? '运算中...' : (running && !paused) ? '调度演示中，请先暂停' : '开始执行调度';
     }
     if (pauseBtn) {
         pauseBtn.disabled = !running || paused;
@@ -1261,6 +1233,7 @@ function updateMapButtons(running, paused) {
     if (resumeBtn) {
         resumeBtn.disabled = !paused;
         resumeBtn.style.opacity = !paused ? '0.5' : '1';
+        resumeBtn.title = tasksModifiedWhilePaused ? '任务已修改，将继续时重新计算' : '继续调度';
     }
     if (stopBtn) {
         stopBtn.disabled = !running && !paused;
@@ -1268,24 +1241,24 @@ function updateMapButtons(running, paused) {
     }
 }
 
-async function mapComputeSchedule() {
+async function mapRunSchedule() {
     try {
         if (isScheduleRequesting) {
-            console.log('[mapComputeSchedule] already requesting, skip');
+            console.log('[mapRunSchedule] already requesting, skip');
             return;
         }
         isScheduleRequesting = true;
-        console.log('[mapComputeSchedule] starting');
+        console.log('[mapRunSchedule] starting');
 
         const strategyEl = document.getElementById('mapStrategySelect');
         if (!strategyEl) {
-            console.error('[mapComputeSchedule] mapStrategySelect not found');
+            console.error('[mapRunSchedule] mapStrategySelect not found');
             alert('找不到策略选择器');
             isScheduleRequesting = false;
             return;
         }
         const strategy = strategyEl.value;
-        console.log('[mapComputeSchedule] strategy:', strategy);
+        console.log('[mapRunSchedule] strategy:', strategy);
 
         updateMapButtons(false, false);
 
@@ -1302,86 +1275,67 @@ async function mapComputeSchedule() {
 
         if (result.success && result.data) {
             currentScheduleResult = result.data;
-            isScheduleComputed = true;
             scheduleCompleted = false;
             isScheduleRequesting = false;
+            tasksModifiedWhilePaused = false;
 
             const batchEl = document.getElementById('currentBatch');
             if (batchEl) batchEl.textContent = `批次: ${result.data.batch_id || '-'}`;
 
             try {
                 renderScheduleResult(result.data);
-                console.log('[mapComputeSchedule] renderScheduleResult done');
+                console.log('[mapRunSchedule] renderScheduleResult done');
             } catch (e) {
-                console.error('[mapComputeSchedule] renderScheduleResult error:', e);
-                const resultDiv = document.getElementById('scheduleResult');
-                if (resultDiv) {
-                    resultDiv.innerHTML = `<div class="alert alert-error">渲染结果失败: ${e.message}</div>`;
-                }
+                console.error('[mapRunSchedule] renderScheduleResult error:', e);
             }
-            updateMapButtons(false, false);
-            console.log('[mapComputeSchedule] done, makespan:', result.data.makespan, 'tasks:', result.data.num_tasks);
+
+            // 自动开始动画播放
+            if (!dynamicMap) {
+                alert('地图未初始化');
+                updateMapButtons(false, false);
+                return;
+            }
+
+            const assignments = result.data.assignments;
+            if (!assignments || assignments.length === 0) {
+                alert('没有可执行的任务分配');
+                updateMapButtons(false, false);
+                return;
+            }
+
+            isSchedulePlaying = true;
+            console.log('[mapRunSchedule] starting animation');
+
+            dynamicMap.setProgressCallback((progress) => {
+                if (progress >= 100) {
+                    scheduleCompleted = true;
+                    isScheduleRunning = false;
+                    isSchedulePlaying = false;
+                    updateMapButtons(false, false);
+                    loadLogs();
+                }
+            });
+
+            const speedEl = document.getElementById('mapSpeedSelect');
+            const speed = speedEl ? parseFloat(speedEl.value) || 1 : 1;
+            dynamicMap.playSchedule(assignments, speed);
+            isScheduleRunning = true;
+            updateMapButtons(true, false);
+            updateVehicleStatusPanel();
+            console.log('[mapRunSchedule] done, makespan:', result.data.makespan, 'tasks:', result.data.num_tasks);
         } else {
             isScheduleRequesting = false;
             const errMsg = result.error || '未知错误';
-            console.error('[mapComputeSchedule] API failed:', errMsg);
+            console.error('[mapRunSchedule] API failed:', errMsg);
             alert('运算失败: ' + errMsg);
             updateMapButtons(false, false);
         }
     } catch (e) {
-        console.error('mapComputeSchedule error:', e);
-        alert('执行运算出错: ' + e.message);
+        console.error('mapRunSchedule error:', e);
+        alert('执行调度出错: ' + e.message);
         isScheduleRequesting = false;
+        isSchedulePlaying = false;
         updateMapButtons(false, false);
-    }
-}
-
-function mapPlaySchedule() {
-    if (isSchedulePlaying) {
-        console.log('[mapPlaySchedule] already playing, skip');
-        return;
-    }
-    if (!currentScheduleResult || !currentScheduleResult.assignments || currentScheduleResult.assignments.length === 0) {
-        alert('请先点击"开始运算"获取调度结果');
-        return;
-    }
-    if (!dynamicMap) {
-        alert('地图未初始化');
-        return;
-    }
-
-    isSchedulePlaying = true;
-    console.log('[mapPlaySchedule] starting animation');
-
-    dynamicMap.setProgressCallback((progress) => {
-        if (progress >= 100) {
-            scheduleCompleted = true;
-            isScheduleRunning = false;
-            isSchedulePlaying = false;
-            updateMapButtons(false, false);
-            loadLogs();
-        }
-    });
-
-    const speedEl = document.getElementById('mapSpeedSelect');
-    const speed = speedEl ? parseFloat(speedEl.value) || 1 : 1;
-    dynamicMap.playSchedule(currentScheduleResult.assignments, speed);
-    isScheduleRunning = true;
-    updateMapButtons(true, false);
-    updateVehicleStatusPanel();
-}
-
-function onStrategyChange() {
-    // 切换策略时重置运算状态
-    if (isScheduleComputed) {
-        isScheduleComputed = false;
-        currentScheduleResult = null;
-        updateMapButtons(false, false);
-        const resultDiv = document.getElementById('scheduleResult');
-        if (resultDiv) {
-            resultDiv.style.display = 'none';
-            resultDiv.innerHTML = '';
-        }
     }
 }
 
@@ -1393,8 +1347,17 @@ function mapPauseSchedule() {
     }
 }
 
-function mapResumeSchedule() {
-    if (dynamicMap && !scheduleCompleted) {
+async function mapResumeSchedule() {
+    if (scheduleCompleted) return;
+
+    // 如果暂停期间任务被修改，需要重新计算
+    if (tasksModifiedWhilePaused) {
+        console.log('[mapResumeSchedule] tasks modified, re-running schedule');
+        await mapRunSchedule();
+        return;
+    }
+
+    if (dynamicMap) {
         dynamicMap.resumeSchedule();
         isScheduleRunning = true;
         updateMapButtons(true, false);
@@ -1408,6 +1371,7 @@ function mapStopSchedule() {
         isScheduleRunning = false;
         scheduleCompleted = true;
         isSchedulePlaying = false;
+        tasksModifiedWhilePaused = false;
         updateMapButtons(false, false);
         loadLogs();
     }

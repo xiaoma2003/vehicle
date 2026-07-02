@@ -40,14 +40,13 @@
                 <canvas id="mapCanvas" class="map-canvas" width="800" height="550"></canvas>
             </div>
             <div id="map-toolbar" class="map-toolbar">
-                <select id="mapStrategySelect" class="form-select" style="width:auto;display:inline-block;" onchange="onStrategyChange()">
+                <select id="mapStrategySelect" class="form-select" style="width:auto;display:inline-block;">
                     <option value="cpsat">CP-SAT 基准策略</option>
                     <option value="greedy">贪心算法</option>
                     <option value="genetic">遗传算法</option>
                     <option value="simulated_annealing">模拟退火</option>
                 </select>
-                <button id="mapComputeBtn" class="btn btn-primary">开始运算</button>
-                <button id="mapRunBtn" class="btn btn-success" disabled>执行调度</button>
+                <button id="mapRunBtn" class="btn btn-primary">执行调度</button>
                 <button id="mapPauseBtn" class="btn btn-warning" disabled>暂停</button>
                 <button id="mapResumeBtn" class="btn btn-success" disabled>继续</button>
                 <button id="mapStopBtn" class="btn btn-danger" disabled>停止</button>
@@ -59,13 +58,6 @@
                     <option value="8">8x</option>
                 </select>
                 <span id="mouse-coords" class="mouse-coords">坐标: -</span>
-            </div>
-            <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <select id="directionSelect" class="form-select" style="width:auto;" onchange="checkDirectionLock()">
-                    <option value="up">上行</option>
-                    <option value="down">下行</option>
-                </select>
-                <span id="directionStatus" class="direction-status">方向状态: -</span>
             </div>
             <div id="vehicleStatusList" class="vehicle-status-panel" style="margin-top:16px;"></div>
             <div id="scheduleResult" class="result-panel" style="display:none;margin-top:16px;"></div>
@@ -249,8 +241,7 @@
     <script>
         // 验证关键函数是否可访问
         window.addEventListener('load', function() {
-            console.log('Page loaded. mapComputeSchedule exists:', typeof mapComputeSchedule);
-            console.log('mapPlaySchedule exists:', typeof mapPlaySchedule);
+            console.log('Page loaded. mapRunSchedule exists:', typeof mapRunSchedule);
             console.log('dynamicMap exists:', typeof dynamicMap !== 'undefined' && dynamicMap !== null);
             const btn = document.getElementById('mapRunBtn');
             console.log('mapRunBtn:', btn, 'disabled:', btn ? btn.disabled : 'N/A');
