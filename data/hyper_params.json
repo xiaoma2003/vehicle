@@ -10,5 +10,6 @@
   "battery_low_threshold": 100,
   "fuel_low_threshold": 50,
   "energy_consumption_rate": 0.5,
-  "solve_time_limit": 120
+  "solve_time_limit": 120,
+  "safety_gap": 5
 }

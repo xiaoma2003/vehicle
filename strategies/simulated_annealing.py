@@ -64,6 +64,7 @@ class SimulatedAnnealingScheduler:
         loco_available_time = {l["id"]: 0 for l in self.schedulable_locomotives}
         loco_current_node = {l["id"]: l["initial_node"] for l in self.schedulable_locomotives}
 
+        edge_occupancy = {}  # edge_key -> [(entry_time, exit_time, direction), ...]
         task_end_times = {}  # 记录任务实际完成时间
         assignments = []
         scheduled = set()
@@ -114,6 +115,10 @@ class SimulatedAnnealingScheduler:
                     unloading_time = self.hyper_params["unloading_time"]
 
                     start_time = max(loco_available_time[loco_id], dep_ready_time)
+                    # 边安全约束：调整开始时间以避免冲突
+                    start_time = self._adjust_for_edge_safety(
+                        start_time, empty_path_info, path_info, edge_occupancy
+                    )
                     total_time = empty_travel_time + loading_time + travel_time + unloading_time
                     end_time = start_time + total_time
 
@@ -126,6 +131,8 @@ class SimulatedAnnealingScheduler:
 
                 if best_loco:
                     loco_id = best_loco["id"]
+                    # 获取最佳机车的空驶路径信息
+                    empty_path_info = self.precomputed_paths[loco_id][loco_current_node[loco_id]][task["start_node"]]
                     loading_end = best_start_time + best_empty_time + self.hyper_params["loading_time"]
                     transport_end = loading_end + best_path_info["time"]
                     unloading_end = transport_end + self.hyper_params["unloading_time"]
@@ -143,6 +150,10 @@ class SimulatedAnnealingScheduler:
 
                     loco_available_time[loco_id] = unloading_end
                     loco_current_node[loco_id] = task["end_node"]
+                    # 记录边占用
+                    self._add_edge_occupancy(
+                        best_start_time, empty_path_info, best_path_info, edge_occupancy
+                    )
                     scheduled.add(idx)
                     task_end_times[tid] = unloading_end  # 记录实际完成时间（用 task_id 作为 key）
                     made_progress = True
@@ -193,6 +204,128 @@ class SimulatedAnnealingScheduler:
                 neighbor[start:end+1] = reversed(neighbor[start:end+1])
 
         return neighbor
+
+    def _adjust_for_edge_safety(self, start_time, empty_path_info, job_path_info, edge_occupancy):
+        """调整开始时间以避免边安全冲突（同向保持间隔，反向不可重叠）"""
+        safety_gap = self.hyper_params.get("safety_gap", 5)
+        loading = self.hyper_params["loading_time"]
+
+        max_iterations = 100  # 防止无限循环
+        for _ in range(max_iterations):
+            new_start = start_time
+
+            # 检查空驶路径边
+            cumulative = 0
+            for seg in empty_path_info.get("segments", []):
+                entry = start_time + cumulative
+                exit_t = entry + seg["time"]
+                delay = self._find_edge_delay(
+                    seg["from"], seg["to"], entry, exit_t, cumulative, edge_occupancy, safety_gap
+                )
+                if delay is not None and delay > new_start:
+                    new_start = delay
+                cumulative += seg["time"]
+
+            # 检查作业路径边
+            cumulative = empty_path_info["time"] + loading
+            for seg in job_path_info.get("segments", []):
+                entry = start_time + cumulative
+                exit_t = entry + seg["time"]
+                delay = self._find_edge_delay(
+                    seg["from"], seg["to"], entry, exit_t, cumulative, edge_occupancy, safety_gap
+                )
+                if delay is not None and delay > new_start:
+                    new_start = delay
+                cumulative += seg["time"]
+
+            if new_start == start_time:
+                break
+            start_time = new_start
+
+        return start_time
+
+    def _find_edge_delay(self, from_n, to_n, entry, exit_t, offset, edge_occupancy, safety_gap):
+        """检查单条边的冲突，返回需要延迟到的开始时间（无冲突返回 None）"""
+        nodes = sorted([from_n, to_n])
+        edge_key = f"{nodes[0]}-{nodes[1]}"
+
+        if edge_key not in edge_occupancy:
+            return None
+
+        edge = next((e for e in self.map_config["edges"]
+                    if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
+                       (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
+        if edge is None:
+            return None
+
+        edge_dir = edge.get("direction", "bidirectional")
+        if edge_dir == "bidirectional":
+            return None  # 双向边允许双向行驶
+
+        if edge["from"] == from_n and edge["to"] == to_n:
+            task_dir = "forward"
+        else:
+            task_dir = "backward"
+
+        max_delay = None
+        for occ_entry, occ_exit, occ_dir in edge_occupancy[edge_key]:
+            if entry >= occ_exit or exit_t <= occ_entry:
+                continue  # 不重叠，无冲突
+
+            if task_dir != occ_dir:
+                # 反向冲突：必须等到占用结束后才能进入
+                delay = occ_exit - offset
+            else:
+                # 同向：需要安全间隔
+                delay = occ_exit + safety_gap - offset
+
+            if max_delay is None or delay > max_delay:
+                max_delay = delay
+
+        return max_delay
+
+    def _add_edge_occupancy(self, start_time, empty_path_info, job_path_info, edge_occupancy):
+        """记录任务的边占用信息"""
+        safety_gap = self.hyper_params.get("safety_gap", 5)
+        loading = self.hyper_params["loading_time"]
+
+        cumulative = start_time
+        for seg in empty_path_info.get("segments", []):
+            self._mark_edge_occupied(
+                seg["from"], seg["to"], cumulative, cumulative + seg["time"], edge_occupancy
+            )
+            cumulative += seg["time"]
+
+        cumulative = start_time + empty_path_info["time"] + loading
+        for seg in job_path_info.get("segments", []):
+            self._mark_edge_occupied(
+                seg["from"], seg["to"], cumulative, cumulative + seg["time"], edge_occupancy
+            )
+            cumulative += seg["time"]
+
+    def _mark_edge_occupied(self, from_n, to_n, entry, exit_t, edge_occupancy):
+        """标记一条边被占用"""
+        nodes = sorted([from_n, to_n])
+        edge_key = f"{nodes[0]}-{nodes[1]}"
+
+        edge = next((e for e in self.map_config["edges"]
+                    if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
+                       (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
+        if edge is None:
+            return
+
+        edge_dir = edge.get("direction", "bidirectional")
+        if edge_dir == "bidirectional":
+            return  # 双向边不需要记录
+
+        if edge["from"] == from_n and edge["to"] == to_n:
+            task_dir = "forward"
+        else:
+            task_dir = "backward"
+
+        if edge_key not in edge_occupancy:
+            edge_occupancy[edge_key] = []
+        edge_occupancy[edge_key].append((entry, exit_t, task_dir))
 
     def solve(self, initial_temp: float = 1000.0, cooling_rate: float = 0.995,
               min_temp: float = 0.1, iterations_per_temp: int = 20) -> Dict[str, Any]:

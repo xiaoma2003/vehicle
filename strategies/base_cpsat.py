@@ -341,6 +341,101 @@ class CPSATScheduler:
                         task_start[tid1] >= task_end[tid2] + t2_to_t1
                     ).OnlyEnforceIf(both, o.Not())
 
+        # ===== 约束5: 边安全约束 =====
+        # 同一时刻同一道路上的车辆只能向同一方向行驶
+        # 同向车辆之间保持安全间隔
+        safety_gap = self.hyper_params.get("safety_gap", 5)
+
+        # 使用参考机车预计算每条边的占用时间窗口
+        ref_loco = schedulable_locomotives[0]
+        ref_lid = ref_loco["id"]
+
+        # edge_key -> [(task_id, edge_direction, task_dir, entry_offset, exit_offset), ...]
+        edge_occupancy = defaultdict(list)
+
+        for task in active_tasks:
+            tid = task["id"]
+            path_info = self.precomputed_paths[ref_lid][task["start_node"]][task["end_node"]]
+            cumulative = empty_times[ref_lid][tid] + loading  # 作业路径从 loading_end 开始
+            for seg in path_info.get("segments", []):
+                from_n, to_n = seg["from"], seg["to"]
+                # 标准化边键
+                nodes = sorted([from_n, to_n])
+                edge_key = f"{nodes[0]}-{nodes[1]}"
+
+                edge = next((e for e in self.map_config["edges"]
+                            if (e["from"] == nodes[0] and e["to"] == nodes[1]) or
+                               (e["from"] == nodes[1] and e["to"] == nodes[0])), None)
+                if edge is None:
+                    cumulative += seg["time"]
+                    continue
+
+                edge_dir = edge.get("direction", "bidirectional")
+                if edge["from"] == from_n and edge["to"] == to_n:
+                    task_dir = "forward"
+                else:
+                    task_dir = "backward"
+
+                edge_occupancy[edge_key].append({
+                    "task_id": tid,
+                    "edge_dir": edge_dir,
+                    "task_dir": task_dir,
+                    "entry_offset": cumulative,
+                    "exit_offset": cumulative + seg["time"]
+                })
+                cumulative += seg["time"]
+
+        # 为每条边添加安全约束
+        for edge_key, tasks_on_edge in edge_occupancy.items():
+            if len(tasks_on_edge) < 2:
+                continue
+
+            for i in range(len(tasks_on_edge)):
+                t1 = tasks_on_edge[i]
+                for j in range(i + 1, len(tasks_on_edge)):
+                    t2 = tasks_on_edge[j]
+
+                    tid1, tid2 = t1["task_id"], t2["task_id"]
+                    edge_dir1, edge_dir2 = t1["edge_dir"], t2["edge_dir"]
+                    task_dir1, task_dir2 = t1["task_dir"], t2["task_dir"]
+
+                    # 双向边允许双向行驶，不需要方向约束
+                    # 但同向仍需安全间隔
+                    if edge_dir1 == "bidirectional" and edge_dir2 == "bidirectional":
+                        # 双向边上只加安全间隔，不加方向约束
+                        pass
+                    elif edge_dir1 == "bidirectional" or edge_dir2 == "bidirectional":
+                        # 单向边与双向边：单向边任务方向受限
+                        pass
+
+                    off1_entry = int(t1["entry_offset"])
+                    off1_exit = int(t1["exit_offset"])
+                    off2_entry = int(t2["entry_offset"])
+                    off2_exit = int(t2["exit_offset"])
+
+                    is_opposite = (task_dir1 == "forward" and task_dir2 == "backward") or \
+                                  (task_dir1 == "backward" and task_dir2 == "forward")
+
+                    o = model.NewBoolVar(f"edge_o_{edge_key}_{tid1}_{tid2}")
+
+                    if is_opposite:
+                        # 反向：不可重叠
+                        model.Add(
+                            task_start[tid2] + off2_entry >= task_start[tid1] + off1_exit
+                        ).OnlyEnforceIf(o)
+                        model.Add(
+                            task_start[tid1] + off1_entry >= task_start[tid2] + off2_exit
+                        ).OnlyEnforceIf(o.Not())
+                    else:
+                        # 同向：保持安全间隔
+                        gap = self._ceil(safety_gap)
+                        model.Add(
+                            task_start[tid2] + off2_entry >= task_start[tid1] + off1_exit + gap
+                        ).OnlyEnforceIf(o)
+                        model.Add(
+                            task_start[tid1] + off1_entry >= task_start[tid2] + off2_exit + gap
+                        ).OnlyEnforceIf(o.Not())
+
         model.Minimize(makespan)
 
         solver = cp_model.CpSolver()
