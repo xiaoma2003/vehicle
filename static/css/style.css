@@ -1024,3 +1024,117 @@ header h1 {
 .status-badge.status-optimal { background: #d4edda; color: #155724; }
 .status-badge.status-feasible { background: #cce5ff; color: #004085; }
 .status-badge.status-infeasible { background: #f8d7da; color: #721c24; }
+
+/* 甘特图 */
+.gantt-chart-wrapper {
+    overflow-x: auto;
+    margin: 8px 0 16px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: #fff;
+    padding: 8px;
+}
+.gantt-chart {
+    position: relative;
+    min-width: 600px;
+}
+.gantt-header {
+    position: relative;
+    height: 22px;
+    border-bottom: 1px solid #cbd5e0;
+    margin-bottom: 4px;
+}
+.gantt-tick {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #718096;
+    white-space: nowrap;
+}
+.gantt-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+}
+.gantt-label {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #4a5568;
+    padding: 0 8px;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gantt-bar-area {
+    position: relative;
+    flex: 1;
+    height: 28px;
+    background: #f7fafc;
+    border-radius: 4px;
+    overflow: visible;
+}
+.gantt-bar {
+    position: absolute;
+    top: 2px;
+    height: 24px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    cursor: pointer;
+    min-width: 2px;
+    transition: filter 0.15s;
+}
+.gantt-bar:hover {
+    filter: brightness(1.15);
+    z-index: 2;
+}
+.gantt-phase {
+    height: 100%;
+    flex-shrink: 0;
+}
+.gantt-phase-empty {
+    background: rgba(255,255,255,0.45);
+}
+.gantt-phase-transport {
+    background: rgba(0,0,0,0.12);
+}
+.gantt-phase-unload {
+    background: rgba(0,0,0,0.25);
+}
+.gantt-bar-label {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    pointer-events: none;
+}
+.gantt-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: #718096;
+}
+.gantt-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.gantt-legend-color {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #cbd5e0;
+}

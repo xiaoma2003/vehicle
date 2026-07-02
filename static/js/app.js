@@ -1004,6 +1004,9 @@ function buildHistoryDetailHTML(data) {
 
     // 任务分配表格
     if (assignments.length > 0) {
+        // 甘特图
+        html += buildGanttChartHTML(assignments, data.makespan || 100);
+
         html += '<h4 style="margin:12px 0 8px;">任务分配详情</h4>';
         html += '<div class="table-scroll" style="max-height:400px;overflow-y:auto;">';
         html += '<table class="comparison-table"><thead><tr><th>任务ID</th><th>机车</th><th>路径</th><th>开始</th><th>装货结束</th><th>运输结束</th><th>卸货结束</th></tr></thead><tbody>';
@@ -1036,6 +1039,94 @@ function buildHistoryDetailHTML(data) {
     }
 
     html += '</div>';
+    return html;
+}
+
+function buildGanttChartHTML(assignments, makespan) {
+    // 按机车分组
+    const locoGroups = {};
+    assignments.forEach(a => {
+        const lid = a.locomotive_id || '未知';
+        if (!locoGroups[lid]) locoGroups[lid] = [];
+        locoGroups[lid].push(a);
+    });
+
+    const locoIds = Object.keys(locoGroups).sort();
+    const colors = ['#667eea', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#6366f1'];
+    const rowHeight = 36;
+    const labelWidth = 80;
+    const chartHeight = locoIds.length * rowHeight + 40;
+
+    // 生成时间刻度
+    const tickCount = Math.min(10, makespan);
+    const tickInterval = Math.ceil(makespan / tickCount);
+    let ticks = '<div class="gantt-tick" style="left:0%">0</div>';
+    for (let t = tickInterval; t < makespan; t += tickInterval) {
+        const pct = (t / makespan) * 100;
+        ticks += `<div class="gantt-tick" style="left:${pct}%">${t}</div>`;
+    }
+    const endPct = 100;
+    ticks += `<div class="gantt-tick" style="left:${endPct}%">${makespan}</div>`;
+
+    let html = '<h4 style="margin:12px 0 8px;">任务调度甘特图</h4>';
+    html += '<div class="gantt-chart-wrapper">';
+    html += `<div class="gantt-chart" style="height:${chartHeight}px;">`;
+
+    // 时间轴
+    html += `<div class="gantt-header" style="margin-left:${labelWidth}px;">${ticks}</div>`;
+
+    // 机车行
+    locoIds.forEach((locoId, idx) => {
+        const tasks = locoGroups[locoId];
+        const color = colors[idx % colors.length];
+        const top = idx * rowHeight + 24;
+
+        html += `<div class="gantt-row" style="top:${top}px;height:${rowHeight}px;">`;
+        html += `<div class="gantt-label" style="width:${labelWidth}px;">${locoId}</div>`;
+        html += `<div class="gantt-bar-area" style="margin-left:${labelWidth}px;">`;
+
+        tasks.forEach(task => {
+            const st = task.start_time || 0;
+            const ue = task.unloading_end || (st + 1);
+            const le = task.loading_end !== undefined ? task.loading_end : st;
+            const te = task.transport_end !== undefined ? task.transport_end : le;
+
+            const leftPct = (st / makespan) * 100;
+            const widthPct = Math.max(2, ((ue - st) / makespan) * 100);
+
+            // 阶段比例
+            const totalDuration = ue - st || 1;
+            const emptyPct = Math.max(0, ((le - st) / totalDuration) * 100);
+            const loadPct = Math.max(0, ((le - st) / totalDuration) * 100); // 装货阶段
+            const transPct = Math.max(0, ((te - le) / totalDuration) * 100); // 运输阶段
+            const unloadPct = Math.max(0, ((ue - te) / totalDuration) * 100); // 卸货阶段
+
+            html += `<div class="gantt-bar" style="left:${leftPct}%;width:${widthPct}%;background:${color};"
+                title="${task.task_id || '-'}: 开始${st} → 装货完成${le} → 运输完成${te} → 卸货完成${ue}">`;
+
+            // 内部阶段指示
+            if (totalDuration > 0) {
+                html += `<div class="gantt-phase gantt-phase-empty" style="width:${loadPct}%;" title="空驶+装货"></div>`;
+                html += `<div class="gantt-phase gantt-phase-transport" style="width:${transPct}%;" title="运输"></div>`;
+                html += `<div class="gantt-phase gantt-phase-unload" style="width:${unloadPct}%;" title="卸货"></div>`;
+            }
+
+            html += `<span class="gantt-bar-label">${task.task_id || '-'}</span>`;
+            html += '</div>';
+        });
+
+        html += '</div></div>';
+    });
+
+    html += '</div></div>';
+
+    // 图例
+    html += '<div class="gantt-legend">';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-color" style="background:rgba(255,255,255,0.5);"></span>空驶+装货</span>';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-color" style="background:rgba(0,0,0,0.15);"></span>运输</span>';
+    html += '<span class="gantt-legend-item"><span class="gantt-legend-color" style="background:rgba(0,0,0,0.3);"></span>卸货</span>';
+    html += '</div>';
+
     return html;
 }
 
